@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum Group {
+  GROUP_1
+  GROUP_2
+  GROUP_3
+  GROUP_4
+  GROUP_5
+}
+
+model User {
+  id        String   @id @db.Uuid // Matches Supabase auth.users.id
+  email     String   @unique
+  status    String   @default("UNVERIFIED")
+  role      Role?
+  group     Group?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
