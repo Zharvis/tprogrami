@@ -7,6 +7,9 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
   const typeId = '66666666-6666-6666-6666-666666666666';
   const activityId1 = '77777777-7777-7777-7777-777777777771';
   const activityId2 = '77777777-7777-7777-7777-777777777772';
+  const overrideId1 = '88888888-8888-8888-8888-888888888881';
+  const overrideId2 = '88888888-8888-8888-8888-888888888882';
+  const overrideId3 = '88888888-8888-8888-8888-888888888883';
   
   const studentId = '00000000-0000-0000-0000-000000000055';
   const teacherId = '00000000-0000-0000-0000-000000000056';
@@ -16,6 +19,7 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
 
   test.beforeEach(async () => {
     // Clean up first to be safe
+    await prisma.override.deleteMany({ where: { id: { in: [overrideId1, overrideId2, overrideId3] } } }).catch(() => {});
     await prisma.activity.deleteMany({ where: { weeklyPlanId: planId } }).catch(() => {});
     await prisma.weeklyPlan.deleteMany({ where: { id: planId } }).catch(() => {});
     await prisma.activityType.deleteMany({ where: { id: typeId } }).catch(() => {});
@@ -91,6 +95,7 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
 
   test.afterEach(async () => {
     try {
+      await prisma.override.deleteMany({ where: { id: { in: [overrideId1, overrideId2, overrideId3] } } }).catch(() => {});
       await prisma.activity.deleteMany({ where: { weeklyPlanId: planId } }).catch(() => {});
       await prisma.weeklyPlan.deleteMany({ where: { id: planId } }).catch(() => {});
       await prisma.activityType.deleteMany({ where: { id: typeId } }).catch(() => {});
@@ -145,6 +150,118 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
     const titles = instances.map(i => i.title);
     expect(titles).toContain('Group 1 Activity');
     expect(titles).toContain('Group 2 Activity');
+  });
+
+  test('applies date-specific override modifications (Slice 2)', async () => {
+    // Create a modification override for Activity 1 on Monday, June 8
+    await prisma.override.create({
+      data: {
+        id: overrideId1,
+        date: '2026-06-08',
+        isCancelled: false,
+        activityId: activityId1,
+        title: 'Overridden Math Class',
+        startTime: '10:00',
+        endTime: '11:30',
+      },
+    });
+
+    const startDate = new Date('2026-06-08T00:00:00.000Z');
+    const endDate = new Date('2026-06-14T23:59:59.999Z');
+
+    const instances = await resolveSchedule({
+      userId: studentId,
+      startDate,
+      endDate,
+    });
+
+    expect(instances).toHaveLength(1);
+    expect(instances[0].title).toBe('Overridden Math Class');
+    expect(instances[0].startTime).toBe('10:00');
+    expect(instances[0].endTime).toBe('11:30');
+  });
+
+  test('applies date-specific override cancellations (Slice 2)', async () => {
+    // Create a cancellation override for Activity 1 on Monday, June 8
+    await prisma.override.create({
+      data: {
+        id: overrideId1,
+        date: '2026-06-08',
+        isCancelled: true,
+        activityId: activityId1,
+      },
+    });
+
+    const startDate = new Date('2026-06-08T00:00:00.000Z');
+    const endDate = new Date('2026-06-14T23:59:59.999Z');
+
+    const instances = await resolveSchedule({
+      userId: studentId,
+      startDate,
+      endDate,
+    });
+
+    expect(instances).toHaveLength(0); // activityId1 is cancelled, activityId2 is for GROUP_2
+  });
+
+  test('applies date-specific one-off activity additions (Slice 2)', async () => {
+    // Create a one-off activity addition override for Monday, June 8
+    await prisma.override.create({
+      data: {
+        id: overrideId1,
+        date: '2026-06-08',
+        isCancelled: false,
+        activityId: null,
+        title: 'One-off TDD Workshop',
+        startTime: '14:00',
+        endTime: '15:30',
+        activityTypeId: typeId,
+        groups: ['GROUP_1'],
+      },
+    });
+
+    const startDate = new Date('2026-06-08T00:00:00.000Z');
+    const endDate = new Date('2026-06-14T23:59:59.999Z');
+
+    const instances = await resolveSchedule({
+      userId: studentId,
+      startDate,
+      endDate,
+    });
+
+    expect(instances).toHaveLength(2);
+    const titles = instances.map(i => i.title);
+    expect(titles).toContain('Group 1 Activity');
+    expect(titles).toContain('One-off TDD Workshop');
+  });
+
+  test('one-off activity additions respect student group filters (Slice 2)', async () => {
+    // Create a one-off activity addition override targeting GROUP_2 on Monday, June 8
+    await prisma.override.create({
+      data: {
+        id: overrideId1,
+        date: '2026-06-08',
+        isCancelled: false,
+        activityId: null,
+        title: 'One-off for Group 2',
+        startTime: '14:00',
+        endTime: '15:30',
+        activityTypeId: typeId,
+        groups: ['GROUP_2'],
+      },
+    });
+
+    const startDate = new Date('2026-06-08T00:00:00.000Z');
+    const endDate = new Date('2026-06-14T23:59:59.999Z');
+
+    const instances = await resolveSchedule({
+      userId: studentId, // Student is in GROUP_1
+      startDate,
+      endDate,
+    });
+
+    expect(instances).toHaveLength(1);
+    expect(instances[0].title).toBe('Group 1 Activity'); // only their own group's activity
   });
 
   test.describe('Happening Now / Up Next Banner Logic', () => {
@@ -236,6 +353,63 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
       // Go to schedule for July 20, 2026
       await page.goto('/schedule?date=2026-07-20');
       await expect(page.locator('body')).not.toContainText(/Beyond schedule horizon/i);
+    });
+
+    test('teachers see only their assigned activities by default, but can toggle to see all', async ({ page, context }) => {
+      // Setup teacher assigned to Activity 1
+      await prisma.activity.update({
+        where: { id: activityId1 },
+        data: { teachers: { connect: [{ id: teacherId }] } }
+      });
+
+      await context.addCookies([
+        {
+          name: 'sb-access-token',
+          value: `mock-user-${teacherId}`,
+          domain: 'localhost',
+          path: '/',
+        }
+      ]);
+
+      await page.goto('/schedule?date=2026-06-08');
+
+      // Should default to only showing assigned activity
+      await expect(page.locator('body')).toContainText('Group 1 Activity');
+      await expect(page.locator('body')).not.toContainText('Group 2 Activity');
+
+      // Uncheck the toggle
+      await page.getByLabel('My Activities Only').uncheck();
+
+      // Now it should show all activities across all groups
+      await expect(page.locator('body')).toContainText('Group 1 Activity');
+      await expect(page.locator('body')).toContainText('Group 2 Activity');
+    });
+
+    test('users can toggle between Agenda and Grid views', async ({ page, context }) => {
+      await context.addCookies([
+        {
+          name: 'sb-access-token',
+          value: 'mock-verified-token',
+          domain: 'localhost',
+          path: '/',
+        }
+      ]);
+
+      await page.goto('/schedule?date=2026-06-08');
+
+      // Should default to Agenda view
+      await expect(page.getByTestId('agenda-view')).toBeVisible();
+
+      // Click the Grid toggle
+      await page.getByRole('button', { name: 'Grid' }).click();
+
+      // Now Grid view should be visible, and Agenda hidden
+      await expect(page.getByTestId('grid-view')).toBeVisible();
+      await expect(page.getByTestId('agenda-view')).not.toBeVisible();
+
+      // Toggle back to Agenda
+      await page.getByRole('button', { name: 'Agenda' }).click();
+      await expect(page.getByTestId('agenda-view')).toBeVisible();
     });
   });
 });

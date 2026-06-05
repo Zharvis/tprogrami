@@ -16,6 +16,9 @@ export interface ActivityInstance {
     id: string;
     email: string;
   }[];
+  isOverride?: boolean;
+  overrideId?: string;
+  isOneOff?: boolean;
 }
 
 export interface ResolveScheduleOptions {
@@ -57,6 +60,23 @@ export async function resolveSchedule(options: ResolveScheduleOptions): Promise<
     return [];
   }
 
+  // Fetch all overrides within the date range
+  const startStr = startDate.toISOString().split('T')[0];
+  const endStr = endDate.toISOString().split('T')[0];
+
+  const overrides = await prisma.override.findMany({
+    where: {
+      date: {
+        gte: startStr,
+        lte: endStr,
+      },
+    },
+    include: {
+      activityType: true,
+      teachers: true,
+    },
+  });
+
   const instances: ActivityInstance[] = [];
 
   // Iterate date-by-date from startDate to endDate
@@ -69,34 +89,109 @@ export async function resolveSchedule(options: ResolveScheduleOptions): Promise<
     const jsDay = current.getUTCDay();
     const dayOfWeek = jsDay === 0 ? 7 : jsDay;
 
-    let dayActivities = activePlan.activities.filter(
+    // Get baseline activities for this day of week
+    const baselineActivities = activePlan.activities.filter(
       (act) => act.dayOfWeek === dayOfWeek
     );
 
-    // Apply student group filtering
+    // Get overrides for this date
+    const dayOverrides = overrides.filter((o) => o.date === dateStr);
+
+    // Build the list of activities for this day
+    const resolvedDayActivities: any[] = [];
+
+    console.log(`[DEBUG] Date: ${dateStr}, Day of Week: ${dayOfWeek}`);
+    console.log(`[DEBUG] Baseline count: ${baselineActivities.length}`);
+    console.log(`[DEBUG] Overrides count: ${dayOverrides.length}`);
+
+    // 1. Process baseline activities, applying overrides
+    for (const act of baselineActivities) {
+      const override = dayOverrides.find((o) => o.activityId === act.id);
+      console.log(`[DEBUG] Act ID: ${act.id}, Match Override: ${!!override}`);
+      if (override) {
+        if (override.isCancelled) {
+          console.log(`[DEBUG] Skipping cancelled act: ${act.id}`);
+          // Skip cancelled activity
+          continue;
+        }
+        // Add modified activity
+        resolvedDayActivities.push({
+          id: `${act.id}-${dateStr}`,
+          title: override.title ?? act.title,
+          date: dateStr,
+          startTime: override.startTime ?? act.startTime,
+          endTime: override.endTime ?? act.endTime,
+          activityType: override.activityType
+            ? { id: override.activityType.id, name: override.activityType.name, color: override.activityType.color }
+            : { id: act.activityType.id, name: act.activityType.name, color: act.activityType.color },
+          groups: (override.groups && override.groups.length > 0) ? override.groups : act.groups,
+          teachers: (override.teachers && override.teachers.length > 0) ? override.teachers : act.teachers,
+        });
+      } else {
+        // No override, add baseline activity
+        resolvedDayActivities.push({
+          id: `${act.id}-${dateStr}`,
+          title: act.title,
+          date: dateStr,
+          startTime: act.startTime,
+          endTime: act.endTime,
+          activityType: {
+            id: act.activityType.id,
+            name: act.activityType.name,
+            color: act.activityType.color,
+          },
+          groups: act.groups,
+          teachers: act.teachers,
+        });
+      }
+    }
+
+    // 2. Add one-off activities (overrides with activityId === null)
+    const oneOffs = dayOverrides.filter((o) => o.activityId === null);
+    for (const override of oneOffs) {
+      console.log(`[DEBUG] Adding one-off override: ${override.id}`);
+      resolvedDayActivities.push({
+        id: `${override.id}-${dateStr}`,
+        title: override.title ?? '',
+        date: dateStr,
+        startTime: override.startTime ?? '',
+        endTime: override.endTime ?? '',
+        activityType: override.activityType
+          ? { id: override.activityType.id, name: override.activityType.name, color: override.activityType.color }
+          : { id: '', name: 'Unknown', color: '#ccc' },
+        groups: override.groups,
+        teachers: override.teachers,
+        isOneOff: true,
+        overrideId: override.id,
+      });
+    }
+
+    // 3. Apply student group filtering on the final day's activities
+    let filteredDayActivities = resolvedDayActivities;
     if (user.role === 'STUDENT' && user.group) {
-      dayActivities = dayActivities.filter(
+      filteredDayActivities = filteredDayActivities.filter(
         (act) => act.groups.length === 0 || act.groups.includes(user.group!)
       );
     }
+    console.log(`[DEBUG] Final day activity count: ${filteredDayActivities.length}`);
 
-    for (const act of dayActivities) {
+    // 4. Push to instances
+    for (const act of filteredDayActivities) {
       instances.push({
-        id: `${act.id}-${dateStr}`,
+        id: act.id,
         title: act.title,
-        date: dateStr,
+        date: act.date,
         startTime: act.startTime,
         endTime: act.endTime,
-        activityType: {
-          id: act.activityType.id,
-          name: act.activityType.name,
-          color: act.activityType.color,
-        },
+        activityType: act.activityType,
         groups: act.groups,
-        teachers: act.teachers.map((t) => ({
+        teachers: act.teachers.map((t: any) => ({
           id: t.id,
           email: t.email,
         })),
+        isOverride: act.isOverride,
+        overrideId: act.overrideId,
+        isOneOff: act.isOneOff,
       });
     }
 

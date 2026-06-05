@@ -31,7 +31,8 @@ model User {
   updatedAt        DateTime   @updatedAt
   
   // Relations
-  taughtActivities Activity[] @relation("ActivityTeachers")
+  taughtActivities   Activity[] @relation("ActivityTeachers")
+  overrideActivities Override[] @relation("OverrideTeachers")
 }
 
 model WeeklyPlan {
@@ -48,6 +49,7 @@ model ActivityType {
   name       String     @unique // e.g. "Lesson", "Workshop", "Break"
   color      String     // Hex code or tailwind color name
   activities Activity[]
+  overrides  Override[]
   createdAt  DateTime   @default(now())
   updatedAt  DateTime   @updatedAt
 }
@@ -72,6 +74,33 @@ model Activity {
   // Assigned Teachers (many-to-many)
   teachers       User[]       @relation("ActivityTeachers")
   
+  // Overrides for specific dates
+  overrides      Override[]
+  
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+}
+
+model Override {
+  id             String        @id @default(uuid()) @db.Uuid
+  date           String        // "YYYY-MM-DD" e.g., "2026-06-08"
+  isCancelled    Boolean       @default(false)
+  
+  // Optional link to parent recurring activity:
+  activityId     String?       @db.Uuid
+  activity       Activity?     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  
+  // Overridden or custom fields (null values fall back to parent activity)
+  title          String?
+  startTime      String?       // "HH:MM"
+  endTime        String?       // "HH:MM"
+  
+  activityTypeId String?       @db.Uuid
+  activityType   ActivityType? @relation(fields: [activityTypeId], references: [id])
+  
+  groups         Group[]
+  teachers       User[]        @relation("OverrideTeachers")
+  
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 }

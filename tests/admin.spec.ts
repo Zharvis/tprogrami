@@ -276,6 +276,195 @@ test.describe('Admin Verification Workflow', () => {
       await expect(body).toContainText('Overlap Lesson B');
     });
   });
+
+  test.describe.serial('Admin Overrides E2E Workflow', () => {
+    const planId = '00000000-0000-0000-0000-000000000200';
+    const typeId = '00000000-0000-0000-0000-000000000201';
+    const activityId = '00000000-0000-0000-0000-000000000202';
+
+    test.beforeEach(async () => {
+      // Deactivate other plans to make this plan the active one
+      await prisma.weeklyPlan.updateMany({
+        data: { isActive: false },
+      });
+
+      // Seed a weekly plan
+      await prisma.weeklyPlan.upsert({
+        where: { id: planId },
+        update: { isActive: true },
+        create: {
+          id: planId,
+          name: 'Overrides Test Baseline',
+          isActive: true,
+        },
+      });
+
+      // Seed activity type
+      await prisma.activityType.upsert({
+        where: { id: typeId },
+        update: { name: 'Test Override Lesson', color: '#ef4444' },
+        create: {
+          id: typeId,
+          name: 'Test Override Lesson',
+          color: '#ef4444',
+        },
+      });
+
+      // Seed baseline recurring activity (Monday, targets GROUP_1)
+      await prisma.activity.upsert({
+        where: { id: activityId },
+        update: {
+          title: 'Math Class',
+          dayOfWeek: 1,
+          startTime: '09:00',
+          endTime: '10:30',
+          weeklyPlanId: planId,
+          activityTypeId: typeId,
+          groups: ['GROUP_1'],
+        },
+        create: {
+          id: activityId,
+          title: 'Math Class',
+          dayOfWeek: 1,
+          startTime: '09:00',
+          endTime: '10:30',
+          weeklyPlanId: planId,
+          activityTypeId: typeId,
+          groups: ['GROUP_1'],
+        },
+      });
+
+      // Clean up existing overrides to ensure a clean slate
+      await prisma.override.deleteMany({});
+    });
+
+    test.afterEach(async () => {
+      await prisma.override.deleteMany({}).catch(() => {});
+
+      await prisma.activity.delete({
+        where: { id: activityId },
+      }).catch(() => {});
+
+      await prisma.weeklyPlan.delete({
+        where: { id: planId },
+      }).catch(() => {});
+
+      await prisma.activityType.delete({
+        where: { id: typeId },
+      }).catch(() => {});
+    });
+
+    test('admin can cancel a recurring activity for a specific date', async ({ page, context }) => {
+      // 1. Log in as Admin
+      await context.addCookies([
+        {
+          name: 'sb-access-token',
+          value: 'mock-admin-token',
+          domain: 'localhost',
+          path: '/',
+        }
+      ]);
+
+      // 2. Go to schedule page for Monday, June 8, 2026
+      await page.goto('/schedule?date=2026-06-08');
+
+      // 3. Confirm activity exists
+      await expect(page.locator('body')).toContainText('Math Class');
+
+      // 4. Click Cancel button (handle confirm dialog)
+      page.once('dialog', dialog => dialog.accept());
+      await page.getByRole('button', { name: /Cancel/i }).first().click();
+
+      // 5. Assert that the activity is removed from the schedule view
+      await expect(page.locator('body')).not.toContainText('Math Class');
+
+      // 6. Verify database record
+      const override = await prisma.override.findFirst({
+        where: { activityId, date: '2026-06-08' },
+      });
+      expect(override).toBeDefined();
+      expect(override?.isCancelled).toBe(true);
+    });
+
+    test('admin can modify a recurring activity details for a specific date', async ({ page, context }) => {
+      // 1. Log in as Admin
+      await context.addCookies([
+        {
+          name: 'sb-access-token',
+          value: 'mock-admin-token',
+          domain: 'localhost',
+          path: '/',
+        }
+      ]);
+
+      // 2. Go to schedule page
+      await page.goto('/schedule?date=2026-06-08');
+
+      // 3. Click Edit
+      await page.getByRole('button', { name: /Edit/i }).first().click();
+
+      // 4. Modify form
+      await page.locator('input[placeholder="e.g. Guest Speaker Session..."]').fill('Math Class - Advanced');
+      await page.locator('input[type="time"]').first().fill('09:30');
+      await page.locator('input[type="time"]').nth(1).fill('11:00');
+
+      // 5. Submit
+      await page.getByRole('button', { name: /Save Override/i }).click();
+
+      // 6. Assert UI updates
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.locator('body')).toContainText('Math Class - Advanced');
+      await expect(page.locator('body')).toContainText('09:30 - 11:00');
+      await expect(page.locator('body')).toContainText('Override');
+
+      // 7. Verify database record
+      const override = await prisma.override.findFirst({
+        where: { activityId, date: '2026-06-08' },
+      });
+      expect(override?.title).toBe('Math Class - Advanced');
+      expect(override?.startTime).toBe('09:30');
+      expect(override?.endTime).toBe('11:00');
+    });
+
+    test('admin can add a one-off activity for a specific date', async ({ page, context }) => {
+      // 1. Log in as Admin
+      await context.addCookies([
+        {
+          name: 'sb-access-token',
+          value: 'mock-admin-token',
+          domain: 'localhost',
+          path: '/',
+        }
+      ]);
+
+      // 2. Go to schedule page
+      await page.goto('/schedule?date=2026-06-08');
+
+      // 3. Click Add One-off Activity
+      await page.getByRole('button', { name: /\+ Add One-off Activity/i }).first().click();
+
+      // 4. Fill form
+      await page.locator('input[placeholder="e.g. Guest Speaker Session..."]').fill('Special Guest Lecture');
+      await page.locator('input[type="time"]').first().fill('14:00');
+      await page.locator('input[type="time"]').nth(1).fill('15:30');
+      await page.locator('input[value="GROUP_1"]').check();
+
+      // 5. Submit
+      await page.getByRole('button', { name: /Save Override/i }).click();
+
+      // 6. Assert UI updates
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(page.locator('body')).toContainText('Special Guest Lecture');
+
+      // 7. Verify database record
+      const override = await prisma.override.findFirst({
+        where: { title: 'Special Guest Lecture' },
+      });
+      expect(override).not.toBeNull();
+      expect(override?.startTime).toBe('14:00');
+      expect(override?.endTime).toBe('15:30');
+    });
+  });
 });
 
 

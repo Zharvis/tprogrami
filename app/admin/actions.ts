@@ -219,4 +219,79 @@ export async function renameWeeklyPlan(planId: string, name: string) {
   revalidatePath(`/admin/weekly-plans/${planId}`)
 }
 
+export async function upsertOverride(formData: FormData) {
+  const currentUser = await getCurrentUser()
+  if (!currentUser || currentUser.role !== 'ADMIN') {
+    throw new Error('Unauthorized')
+  }
+
+  const id = formData.get('id') as string // optional
+  const date = formData.get('date') as string
+  const isCancelledStr = formData.get('isCancelled') as string
+  const activityId = formData.get('activityId') as string || null
+  
+  console.log('[DEBUG upsertOverride]', { id, date, isCancelledStr, activityId })
+  
+  const title = formData.get('title') as string
+  const startTime = formData.get('startTime') as string
+  const endTime = formData.get('endTime') as string
+  const activityTypeId = formData.get('activityTypeId') as string
+  const groupsRaw = formData.getAll('groups') as string[]
+  const teacherIds = formData.getAll('teacherIds') as string[]
+
+  if (!date) {
+    throw new Error('Date is required')
+  }
+
+  const isCancelled = isCancelledStr === 'true'
+  const groups = groupsRaw.filter((g): g is Group => Object.values(Group).includes(g as Group))
+
+  const data: any = {
+    date,
+    isCancelled,
+    activityId: activityId || null,
+    title: isCancelled ? null : (title || null),
+    startTime: isCancelled ? null : (startTime || null),
+    endTime: isCancelled ? null : (endTime || null),
+    activityTypeId: isCancelled ? null : (activityTypeId || null),
+    groups: isCancelled ? [] : groups,
+  }
+
+  if (id) {
+    await prisma.override.update({
+      where: { id },
+      data: {
+        ...data,
+        teachers: {
+          set: isCancelled ? [] : teacherIds.map((id) => ({ id })),
+        },
+      },
+    })
+  } else {
+    await prisma.override.create({
+      data: {
+        ...data,
+        teachers: {
+          connect: isCancelled ? [] : teacherIds.map((id) => ({ id })),
+        },
+      },
+    })
+  }
+
+  revalidatePath('/schedule')
+}
+
+export async function deleteOverride(overrideId: string) {
+  const currentUser = await getCurrentUser()
+  if (!currentUser || currentUser.role !== 'ADMIN') {
+    throw new Error('Unauthorized')
+  }
+
+  await prisma.override.delete({
+    where: { id: overrideId },
+  })
+
+  revalidatePath('/schedule')
+}
+
 
