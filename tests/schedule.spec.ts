@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { prisma } from '../lib/prisma';
-import { resolveSchedule, getHappeningAndNext } from '../lib/schedule';
+import { resolveSchedule, mergeSchedule, getHappeningAndNext } from '../lib/schedule';
 
 test.describe.serial('Schedule Projection Logic (TDD)', () => {
   const planId = '55555555-5555-5555-5555-555555555555';
@@ -105,163 +105,188 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
     }
   });
 
-  test('projects recurring weekly plan activity onto calendar dates (Slice 1)', async () => {
-    const startDate = new Date('2026-06-08T00:00:00.000Z');
-    const endDate = new Date('2026-06-14T23:59:59.999Z');
-
-    const instances = await resolveSchedule({
-      userId: studentId,
-      startDate,
-      endDate,
-    });
-
-    const g1Inst = instances.find(inst => inst.title === 'Group 1 Activity');
-    expect(g1Inst).toBeDefined();
-    expect(g1Inst?.date).toBe('2026-06-08');
-    expect(g1Inst?.startTime).toBe('09:00');
-    expect(g1Inst?.endTime).toBe('10:30');
-  });
-
-  test('filters activities by student group (Slice 2)', async () => {
-    const startDate = new Date('2026-06-08T00:00:00.000Z');
-    const endDate = new Date('2026-06-14T23:59:59.999Z');
-
-    const instances = await resolveSchedule({
-      userId: studentId,
-      startDate,
-      endDate,
-    });
-
-    expect(instances).toHaveLength(1);
-    expect(instances[0].title).toBe('Group 1 Activity');
-  });
-
-  test('does not filter activities by group for teachers (Slice 2)', async () => {
-    const startDate = new Date('2026-06-08T00:00:00.000Z');
-    const endDate = new Date('2026-06-14T23:59:59.999Z');
-
-    const instances = await resolveSchedule({
-      userId: teacherId,
-      startDate,
-      endDate,
-    });
-
-    expect(instances).toHaveLength(2);
-    const titles = instances.map(i => i.title);
-    expect(titles).toContain('Group 1 Activity');
-    expect(titles).toContain('Group 2 Activity');
-  });
-
-  test('applies date-specific override modifications (Slice 2)', async () => {
-    // Create a modification override for Activity 1 on Monday, June 8
-    await prisma.override.create({
-      data: {
-        id: overrideId1,
-        date: '2026-06-08',
-        isCancelled: false,
-        activityId: activityId1,
-        title: 'Overridden Math Class',
-        startTime: '10:00',
-        endTime: '11:30',
+  test.describe('Pure Schedule Merging Logic (Unit)', () => {
+    const type1 = { id: 'type-1', name: 'TDD Lesson', color: '#ef4444' };
+    
+    const baseData = {
+      user: { role: 'STUDENT', group: 'GROUP_1' },
+      activePlan: {
+        activities: [
+          {
+            id: 'act-1',
+            title: 'Group 1 Activity',
+            dayOfWeek: 1, // Monday
+            startTime: '09:00',
+            endTime: '10:30',
+            activityType: type1,
+            groups: ['GROUP_1'],
+            teachers: [],
+          },
+          {
+            id: 'act-2',
+            title: 'Group 2 Activity',
+            dayOfWeek: 1,
+            startTime: '11:00',
+            endTime: '12:30',
+            activityType: type1,
+            groups: ['GROUP_2'],
+            teachers: [],
+          }
+        ]
       },
+      overrides: []
+    };
+
+    test('projects recurring weekly plan activity onto calendar dates (Slice 1)', () => {
+      const startDate = new Date('2026-06-08T00:00:00.000Z');
+      const endDate = new Date('2026-06-14T23:59:59.999Z');
+
+      const instances = mergeSchedule(baseData, startDate, endDate);
+
+      const g1Inst = instances.find(inst => inst.title === 'Group 1 Activity');
+      expect(g1Inst).toBeDefined();
+      expect(g1Inst?.date).toBe('2026-06-08');
+      expect(g1Inst?.startTime).toBe('09:00');
+      expect(g1Inst?.endTime).toBe('10:30');
     });
 
-    const startDate = new Date('2026-06-08T00:00:00.000Z');
-    const endDate = new Date('2026-06-14T23:59:59.999Z');
+    test('filters activities by student group (Slice 2)', () => {
+      const startDate = new Date('2026-06-08T00:00:00.000Z');
+      const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-    const instances = await resolveSchedule({
-      userId: studentId,
-      startDate,
-      endDate,
+      const instances = mergeSchedule(baseData, startDate, endDate);
+
+      expect(instances).toHaveLength(1);
+      expect(instances[0].title).toBe('Group 1 Activity');
     });
 
-    expect(instances).toHaveLength(1);
-    expect(instances[0].title).toBe('Overridden Math Class');
-    expect(instances[0].startTime).toBe('10:00');
-    expect(instances[0].endTime).toBe('11:30');
-  });
+    test('does not filter activities by group for teachers (Slice 2)', () => {
+      const startDate = new Date('2026-06-08T00:00:00.000Z');
+      const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-  test('applies date-specific override cancellations (Slice 2)', async () => {
-    // Create a cancellation override for Activity 1 on Monday, June 8
-    await prisma.override.create({
-      data: {
-        id: overrideId1,
-        date: '2026-06-08',
-        isCancelled: true,
-        activityId: activityId1,
-      },
+      const data = { ...baseData, user: { role: 'TEACHER', group: null } };
+      const instances = mergeSchedule(data, startDate, endDate);
+
+      expect(instances).toHaveLength(2);
+      const titles = instances.map(i => i.title);
+      expect(titles).toContain('Group 1 Activity');
+      expect(titles).toContain('Group 2 Activity');
     });
 
-    const startDate = new Date('2026-06-08T00:00:00.000Z');
-    const endDate = new Date('2026-06-14T23:59:59.999Z');
+    test('applies date-specific override modifications (Slice 2)', () => {
+      const startDate = new Date('2026-06-08T00:00:00.000Z');
+      const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-    const instances = await resolveSchedule({
-      userId: studentId,
-      startDate,
-      endDate,
+      const data = {
+        ...baseData,
+        overrides: [
+          {
+            id: 'ovr-1',
+            date: '2026-06-08',
+            isCancelled: false,
+            activityId: 'act-1',
+            title: 'Overridden Math Class',
+            startTime: '10:00',
+            endTime: '11:30',
+            activityType: null,
+            groups: [],
+            teachers: []
+          }
+        ]
+      };
+
+      const instances = mergeSchedule(data, startDate, endDate);
+
+      expect(instances).toHaveLength(1);
+      expect(instances[0].title).toBe('Overridden Math Class');
+      expect(instances[0].startTime).toBe('10:00');
+      expect(instances[0].endTime).toBe('11:30');
     });
 
-    expect(instances).toHaveLength(0); // activityId1 is cancelled, activityId2 is for GROUP_2
-  });
+    test('applies date-specific override cancellations (Slice 2)', () => {
+      const startDate = new Date('2026-06-08T00:00:00.000Z');
+      const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-  test('applies date-specific one-off activity additions (Slice 2)', async () => {
-    // Create a one-off activity addition override for Monday, June 8
-    await prisma.override.create({
-      data: {
-        id: overrideId1,
-        date: '2026-06-08',
-        isCancelled: false,
-        activityId: null,
-        title: 'One-off TDD Workshop',
-        startTime: '14:00',
-        endTime: '15:30',
-        activityTypeId: typeId,
-        groups: ['GROUP_1'],
-      },
+      const data = {
+        ...baseData,
+        overrides: [
+          {
+            id: 'ovr-1',
+            date: '2026-06-08',
+            isCancelled: true,
+            activityId: 'act-1',
+            title: null,
+            startTime: null,
+            endTime: null,
+            activityType: null,
+            groups: [],
+            teachers: []
+          }
+        ]
+      };
+
+      const instances = mergeSchedule(data, startDate, endDate);
+
+      expect(instances).toHaveLength(0); // activity 1 cancelled, activity 2 filtered out for STUDENT in GROUP_1
     });
 
-    const startDate = new Date('2026-06-08T00:00:00.000Z');
-    const endDate = new Date('2026-06-14T23:59:59.999Z');
+    test('applies date-specific one-off activity additions (Slice 2)', () => {
+      const startDate = new Date('2026-06-08T00:00:00.000Z');
+      const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-    const instances = await resolveSchedule({
-      userId: studentId,
-      startDate,
-      endDate,
+      const data = {
+        ...baseData,
+        overrides: [
+          {
+            id: 'ovr-1',
+            date: '2026-06-08',
+            isCancelled: false,
+            activityId: null,
+            title: 'One-off TDD Workshop',
+            startTime: '14:00',
+            endTime: '15:30',
+            activityType: type1,
+            groups: ['GROUP_1'],
+            teachers: []
+          }
+        ]
+      };
+
+      const instances = mergeSchedule(data, startDate, endDate);
+
+      expect(instances).toHaveLength(2);
+      const titles = instances.map(i => i.title);
+      expect(titles).toContain('Group 1 Activity');
+      expect(titles).toContain('One-off TDD Workshop');
     });
 
-    expect(instances).toHaveLength(2);
-    const titles = instances.map(i => i.title);
-    expect(titles).toContain('Group 1 Activity');
-    expect(titles).toContain('One-off TDD Workshop');
-  });
+    test('one-off activity additions respect student group filters (Slice 2)', () => {
+      const startDate = new Date('2026-06-08T00:00:00.000Z');
+      const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-  test('one-off activity additions respect student group filters (Slice 2)', async () => {
-    // Create a one-off activity addition override targeting GROUP_2 on Monday, June 8
-    await prisma.override.create({
-      data: {
-        id: overrideId1,
-        date: '2026-06-08',
-        isCancelled: false,
-        activityId: null,
-        title: 'One-off for Group 2',
-        startTime: '14:00',
-        endTime: '15:30',
-        activityTypeId: typeId,
-        groups: ['GROUP_2'],
-      },
+      const data = {
+        ...baseData,
+        overrides: [
+          {
+            id: 'ovr-1',
+            date: '2026-06-08',
+            isCancelled: false,
+            activityId: null,
+            title: 'One-off for Group 2',
+            startTime: '14:00',
+            endTime: '15:30',
+            activityType: type1,
+            groups: ['GROUP_2'],
+            teachers: []
+          }
+        ]
+      };
+
+      const instances = mergeSchedule(data, startDate, endDate);
+
+      expect(instances).toHaveLength(1);
+      expect(instances[0].title).toBe('Group 1 Activity'); // only their own group's activity
     });
-
-    const startDate = new Date('2026-06-08T00:00:00.000Z');
-    const endDate = new Date('2026-06-14T23:59:59.999Z');
-
-    const instances = await resolveSchedule({
-      userId: studentId, // Student is in GROUP_1
-      startDate,
-      endDate,
-    });
-
-    expect(instances).toHaveLength(1);
-    expect(instances[0].title).toBe('Group 1 Activity'); // only their own group's activity
   });
 
   test.describe('Happening Now / Up Next Banner Logic', () => {

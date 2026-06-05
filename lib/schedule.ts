@@ -27,59 +27,49 @@ export interface ResolveScheduleOptions {
   endDate: Date;
 }
 
-/**
- * Projects active Weekly Plan activities onto calendar dates within the date range,
- * filtering them according to the user's role and target groups.
- */
-export async function resolveSchedule(options: ResolveScheduleOptions): Promise<ActivityInstance[]> {
-  const { userId, startDate, endDate } = options;
+export interface ScheduleData {
+  user: {
+    role: string | null;
+    group: string | null;
+  };
+  activePlan: {
+    activities: {
+      id: string;
+      title: string;
+      dayOfWeek: number;
+      startTime: string;
+      endTime: string;
+      activityType: { id: string; name: string; color: string; };
+      groups: string[];
+      teachers: { id: string; email: string; }[];
+    }[];
+  } | null;
+  overrides: {
+    id: string;
+    activityId: string | null;
+    date: string;
+    isCancelled: boolean;
+    title: string | null;
+    startTime: string | null;
+    endTime: string | null;
+    activityType: { id: string; name: string; color: string; } | null;
+    groups: string[];
+    teachers: { id: string; email: string; }[];
+  }[];
+}
 
-  // Fetch user role and group
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-  });
-
-  if (!user) {
-    return [];
-  }
-
-  // 1. Fetch active weekly plan
-  const activePlan = await prisma.weeklyPlan.findFirst({
-    where: { isActive: true },
-    include: {
-      activities: {
-        include: {
-          activityType: true,
-          teachers: true,
-        },
-      },
-    },
-  });
+export function mergeSchedule(
+  data: ScheduleData,
+  startDate: Date,
+  endDate: Date
+): ActivityInstance[] {
+  const { user, activePlan, overrides } = data;
 
   if (!activePlan) {
     return [];
   }
 
-  // Fetch all overrides within the date range
-  const startStr = startDate.toISOString().split('T')[0];
-  const endStr = endDate.toISOString().split('T')[0];
-
-  const overrides = await prisma.override.findMany({
-    where: {
-      date: {
-        gte: startStr,
-        lte: endStr,
-      },
-    },
-    include: {
-      activityType: true,
-      teachers: true,
-    },
-  });
-
   const instances: ActivityInstance[] = [];
-
-  // Iterate date-by-date from startDate to endDate
   const current = new Date(startDate.getTime());
   
   while (current <= endDate) {
@@ -100,17 +90,11 @@ export async function resolveSchedule(options: ResolveScheduleOptions): Promise<
     // Build the list of activities for this day
     const resolvedDayActivities: any[] = [];
 
-    console.log(`[DEBUG] Date: ${dateStr}, Day of Week: ${dayOfWeek}`);
-    console.log(`[DEBUG] Baseline count: ${baselineActivities.length}`);
-    console.log(`[DEBUG] Overrides count: ${dayOverrides.length}`);
-
     // 1. Process baseline activities, applying overrides
     for (const act of baselineActivities) {
       const override = dayOverrides.find((o) => o.activityId === act.id);
-      console.log(`[DEBUG] Act ID: ${act.id}, Match Override: ${!!override}`);
       if (override) {
         if (override.isCancelled) {
-          console.log(`[DEBUG] Skipping cancelled act: ${act.id}`);
           // Skip cancelled activity
           continue;
         }
@@ -149,7 +133,6 @@ export async function resolveSchedule(options: ResolveScheduleOptions): Promise<
     // 2. Add one-off activities (overrides with activityId === null)
     const oneOffs = dayOverrides.filter((o) => o.activityId === null);
     for (const override of oneOffs) {
-      console.log(`[DEBUG] Adding one-off override: ${override.id}`);
       resolvedDayActivities.push({
         id: `${override.id}-${dateStr}`,
         title: override.title ?? '',
@@ -173,7 +156,6 @@ export async function resolveSchedule(options: ResolveScheduleOptions): Promise<
         (act) => act.groups.length === 0 || act.groups.includes(user.group!)
       );
     }
-    console.log(`[DEBUG] Final day activity count: ${filteredDayActivities.length}`);
 
     // 4. Push to instances
     for (const act of filteredDayActivities) {
@@ -205,6 +187,64 @@ export async function resolveSchedule(options: ResolveScheduleOptions): Promise<
     }
     return a.startTime.localeCompare(b.startTime);
   });
+}
+
+/**
+ * Projects active Weekly Plan activities onto calendar dates within the date range,
+ * filtering them according to the user's role and target groups.
+ */
+export async function resolveSchedule(options: ResolveScheduleOptions): Promise<ActivityInstance[]> {
+  const { userId, startDate, endDate } = options;
+
+  // Fetch user role and group
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true, group: true }
+  });
+
+  if (!user) {
+    return [];
+  }
+
+  // 1. Fetch active weekly plan
+  const activePlan = await prisma.weeklyPlan.findFirst({
+    where: { isActive: true },
+    include: {
+      activities: {
+        include: {
+          activityType: true,
+          teachers: true,
+        },
+      },
+    },
+  });
+
+  // Fetch all overrides within the date range
+  const startStr = startDate.toISOString().split('T')[0];
+  const endStr = endDate.toISOString().split('T')[0];
+
+  const overrides = await prisma.override.findMany({
+    where: {
+      date: {
+        gte: startStr,
+        lte: endStr,
+      },
+    },
+    include: {
+      activityType: true,
+      teachers: true,
+    },
+  });
+
+  return mergeSchedule(
+    { 
+      user, 
+      activePlan: activePlan as any, 
+      overrides: overrides as any 
+    }, 
+    startDate, 
+    endDate
+  );
 }
 
 /**
