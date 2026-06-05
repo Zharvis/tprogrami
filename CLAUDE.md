@@ -13,3 +13,8 @@ Triage roles map directly to standard labels (e.g. `needs-triage`, `ready-for-ag
 ### Domain docs
 
 Uses a single-context layout with a global `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
+## Git Commits
+
+Always use Conventional Commits (e.g., `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`) for all git commit messages.
+
