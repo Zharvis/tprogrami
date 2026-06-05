@@ -51,6 +51,13 @@ export async function getCurrentUser() {
     return user;
   }
 
+  if (mockToken && mockToken.startsWith('mock-user-')) {
+    const userId = mockToken.replace('mock-user-', '');
+    return await prisma.user.findUnique({
+      where: { id: userId }
+    });
+  }
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null

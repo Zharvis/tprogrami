@@ -22,11 +22,56 @@ enum Group {
 }
 
 model User {
-  id        String   @id @db.Uuid // Matches Supabase auth.users.id
-  email     String   @unique
-  status    String   @default("UNVERIFIED")
-  role      Role?
-  group     Group?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id               String     @id @db.Uuid // Matches Supabase auth.users.id
+  email            String     @unique
+  status           String     @default("UNVERIFIED")
+  role             Role?
+  group            Group?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  
+  // Relations
+  taughtActivities Activity[] @relation("ActivityTeachers")
+}
+
+model WeeklyPlan {
+  id         String     @id @default(uuid()) @db.Uuid
+  name       String     // e.g., "Trimester 1 Baseline"
+  isActive   Boolean    @default(false)
+  activities Activity[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model ActivityType {
+  id         String     @id @default(uuid()) @db.Uuid
+  name       String     @unique // e.g. "Lesson", "Workshop", "Break"
+  color      String     // Hex code or tailwind color name
+  activities Activity[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
+
+model Activity {
+  id             String       @id @default(uuid()) @db.Uuid
+  title          String
+  dayOfWeek      Int          // 1 = Monday, ..., 7 = Sunday
+  startTime      String       // "HH:MM" e.g., "08:30"
+  endTime        String       // "HH:MM" e.g., "10:00"
+  
+  // Relations
+  weeklyPlanId   String       @db.Uuid
+  weeklyPlan     WeeklyPlan   @relation(fields: [weeklyPlanId], references: [id], onDelete: Cascade)
+  
+  activityTypeId String       @db.Uuid
+  activityType   ActivityType @relation(fields: [activityTypeId], references: [id])
+  
+  // Target Groups (can target multiple cohorts)
+  groups         Group[]
+  
+  // Assigned Teachers (many-to-many)
+  teachers       User[]       @relation("ActivityTeachers")
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 }

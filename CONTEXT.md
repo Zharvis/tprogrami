@@ -41,7 +41,7 @@ The isolated landing page that Unverified users see after logging in via OAuth, 
 _Avoid_: Pending page, lobby
 
 **Weekly Plan**:
-The master template that defines the standard recurring rhythm of the school week. It rolls forward indefinitely until superseded.
+The master template that defines the standard recurring rhythm of the school week. It rolls forward indefinitely until superseded. A Weekly Plan is either **Active** (currently in effect) or a **Draft** (inactive, under editing/preparation).
 _Avoid_: Default schedule, master template
 
 **Override**:

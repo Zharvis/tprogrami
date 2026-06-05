@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { prisma } from '../lib/prisma';
 
 test('unauthenticated users are redirected to login', async ({ page }) => {
   // Attempt to access the root page
@@ -48,3 +49,54 @@ test('login page renders Google sign in button', async ({ page }) => {
   const googleBtn = page.getByRole('button', { name: /Sign in with Google/i });
   await expect(googleBtn).toBeVisible();
 });
+
+test.describe('Dynamic Verification Routing', () => {
+  const dynamicUserId = '00000000-0000-0000-0000-000000000095';
+  const dynamicUserEmail = 'dynamic-unverified@test.com';
+
+  test.afterEach(async () => {
+    try {
+      await prisma.user.delete({ where: { email: dynamicUserEmail } });
+    } catch (e) {
+      // Ignore if user didn't exist
+    }
+  });
+
+  test('user is locked in waiting room when unverified, and can bypass when verified', async ({ page, context }) => {
+    // 1. Create unverified user in DB
+    await prisma.user.upsert({
+      where: { email: dynamicUserEmail },
+      update: { status: 'UNVERIFIED', role: null, group: null },
+      create: {
+        id: dynamicUserId,
+        email: dynamicUserEmail,
+        status: 'UNVERIFIED',
+      },
+    });
+
+    // 2. Add cookie with dynamic mock token
+    await context.addCookies([
+      {
+        name: 'sb-access-token',
+        value: `mock-user-${dynamicUserId}`,
+        domain: 'localhost',
+        path: '/',
+      }
+    ]);
+
+    // 3. Go to /schedule -> should redirect to /waiting-room
+    await page.goto('/schedule');
+    await expect(page).toHaveURL(/.*\/waiting-room/);
+
+    // 4. Update user to VERIFIED in DB
+    await prisma.user.update({
+      where: { id: dynamicUserId },
+      data: { status: 'VERIFIED', role: 'STUDENT' },
+    });
+
+    // 5. Go to /schedule -> should NOT redirect to /waiting-room anymore
+    await page.goto('/schedule');
+    await expect(page).not.toHaveURL(/.*\/waiting-room/);
+  });
+});
+
