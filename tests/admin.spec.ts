@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { prisma } from '../lib/prisma';
 
-test.describe('Admin Verification Workflow', () => {
+test.describe.serial('Admin Verification Workflow', () => {
   test('non-admin verified users are redirected away from admin dashboard', async ({ page, context }) => {
     await context.addCookies([
       {

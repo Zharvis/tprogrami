@@ -218,9 +218,6 @@ export default function ScheduleClient({
             <h1 className="text-3xl font-extrabold text-zinc-900 dark:text-zinc-50 tracking-tight">
               School Schedule
             </h1>
-            <p className="text-zinc-500 dark:text-zinc-400 mt-1">
-              Welcome back, <span className="font-semibold">{user.email}</span> ({user.role})
-            </p>
           </div>
           
           <div className="flex items-center gap-2">
