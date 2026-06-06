@@ -108,8 +108,8 @@ export function mergeSchedule(
           activityType: override.activityType
             ? { id: override.activityType.id, name: override.activityType.name, color: override.activityType.color }
             : { id: act.activityType.id, name: act.activityType.name, color: act.activityType.color },
-          groups: (override.groups && override.groups.length > 0) ? override.groups : act.groups,
-          teachers: (override.teachers && override.teachers.length > 0) ? override.teachers : act.teachers,
+          groups: override.overrideGroups ? override.groups : (override.groups && override.groups.length > 0 ? override.groups : act.groups),
+          teachers: override.overrideTeachers ? override.teachers : (override.teachers && override.teachers.length > 0 ? override.teachers : act.teachers),
         });
       } else {
         // No override, add baseline activity

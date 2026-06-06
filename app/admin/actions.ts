@@ -255,6 +255,8 @@ export async function upsertOverride(formData: FormData) {
     endTime: isCancelled ? null : (endTime || null),
     activityTypeId: isCancelled ? null : (activityTypeId || null),
     groups: isCancelled ? [] : groups,
+    overrideGroups: !isCancelled,
+    overrideTeachers: !isCancelled,
   }
 
   if (id) {

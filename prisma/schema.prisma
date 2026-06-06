@@ -99,7 +99,10 @@ model Override {
   activityType   ActivityType? @relation(fields: [activityTypeId], references: [id])
   
   groups         Group[]
+  overrideGroups Boolean       @default(false)
+  
   teachers       User[]        @relation("OverrideTeachers")
+  overrideTeachers Boolean     @default(false)
   
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
