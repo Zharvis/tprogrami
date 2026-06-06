@@ -4,6 +4,7 @@ import { getCurrentUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { Role, Group } from '@/app/generated/prisma'
+import { ScheduleEngine } from '@/lib/schedule'
 
 export async function verifyUser(userId: string, formData: FormData) {
   // 1. Authorize the user
@@ -225,12 +226,19 @@ export async function upsertOverride(formData: FormData) {
     throw new Error('Unauthorized')
   }
 
+  const instanceId = formData.get('instanceId') as string
+  const isCancelledStr = formData.get('isCancelled') as string
+  const isCancelled = isCancelledStr === 'true'
+
+  if (isCancelled && instanceId) {
+    await ScheduleEngine.cancelInstance(instanceId)
+    revalidatePath('/schedule')
+    return
+  }
+
   const id = formData.get('id') as string // optional
   const date = formData.get('date') as string
-  const isCancelledStr = formData.get('isCancelled') as string
   const activityId = formData.get('activityId') as string || null
-  
-  console.log('[DEBUG upsertOverride]', { id, date, isCancelledStr, activityId })
   
   const title = formData.get('title') as string
   const startTime = formData.get('startTime') as string
@@ -243,7 +251,6 @@ export async function upsertOverride(formData: FormData) {
     throw new Error('Date is required')
   }
 
-  const isCancelled = isCancelledStr === 'true'
   const groups = groupsRaw.filter((g): g is Group => Object.values(Group).includes(g as Group))
 
   const data: any = {
@@ -293,6 +300,16 @@ export async function deleteOverride(overrideId: string) {
     where: { id: overrideId },
   })
 
+  revalidatePath('/schedule')
+}
+
+export async function resetInstance(instanceId: string) {
+  const currentUser = await getCurrentUser()
+  if (!currentUser || currentUser.role !== 'ADMIN') {
+    throw new Error('Unauthorized')
+  }
+
+  await ScheduleEngine.resetInstance(instanceId)
   revalidatePath('/schedule')
 }
 

@@ -3,7 +3,7 @@
 import { useState, useTransition, useMemo } from 'react'
 import Link from 'next/link'
 import { Role, Group } from '@/app/generated/prisma'
-import { upsertOverride, deleteOverride } from '../admin/actions'
+import { upsertOverride, resetInstance } from '../admin/actions'
 import { computeLayout, PositionedActivity } from '@/lib/layout-engine'
 
 interface User {
@@ -136,13 +136,9 @@ export default function ScheduleClient({
     startTransition(async () => {
       try {
         const formData = new FormData()
-        formData.append('date', act.date)
+        formData.append('instanceId', act.id)
         formData.append('isCancelled', 'true')
         
-        // Extract original activity id
-        const originalActId = act.id.slice(0, -11)
-        formData.append('activityId', originalActId)
-
         await upsertOverride(formData)
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to cancel activity')
@@ -151,16 +147,15 @@ export default function ScheduleClient({
   }
 
   const handleResetActivity = (act: ActivityInstance) => {
-    if (!act.overrideId) return
     const message = act.isOneOff 
       ? `Are you sure you want to delete this one-off activity?`
       : `Are you sure you want to reset "${act.title}" back to baseline schedule?`
-    
+
     if (!confirm(message)) return
 
     startTransition(async () => {
       try {
-        await deleteOverride(act.overrideId!)
+        await resetInstance(act.id)
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Failed to reset activity')
       }

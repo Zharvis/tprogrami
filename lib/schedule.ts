@@ -151,6 +151,107 @@ export class MaterializedSchedule {
   }
 }
 
+export class ScheduleEngine {
+  /**
+   * Cancels a specific instance of an activity.
+   * instanceId format: `${activityId}-${dateStr}` or `${overrideId}-${dateStr}`
+   */
+  static async cancelInstance(instanceId: string): Promise<void> {
+    const parts = instanceId.split('-');
+    if (parts.length < 5) {
+      throw new Error(`Invalid instance ID format: ${instanceId}`);
+    }
+
+    // Extract date (last 3 parts: YYYY-MM-DD)
+    const date = parts.slice(-3).join('-');
+    // Extract ID (everything before the date)
+    const id = parts.slice(0, -3).join('-');
+
+    // 1. Check if this is already an override
+    const existingOverride = await prisma.override.findUnique({
+      where: { id },
+    });
+
+    if (existingOverride) {
+      await prisma.override.update({
+        where: { id },
+        data: { isCancelled: true },
+      });
+      return;
+    }
+
+    // 2. Check if it's a baseline activity
+    const baselineActivity = await prisma.activity.findUnique({
+      where: { id },
+    });
+
+    if (baselineActivity) {
+      // Check if an override already exists for this baseline on this date
+      const overrideForBaseline = await prisma.override.findFirst({
+        where: { activityId: id, date },
+      });
+
+      if (overrideForBaseline) {
+        await prisma.override.update({
+          where: { id: overrideForBaseline.id },
+          data: { isCancelled: true },
+        });
+        return;
+      }
+
+      await prisma.override.create({
+        data: {
+          date,
+          activityId: id,
+          isCancelled: true,
+        },
+      });
+      return;
+    }
+
+    throw new Error(`Instance not found: ${instanceId}`);
+  }
+
+  /**
+   * Resets an instance back to baseline (or deletes if it's a one-off).
+   */
+  static async resetInstance(instanceId: string): Promise<void> {
+    const parts = instanceId.split('-');
+    if (parts.length < 5) {
+      throw new Error(`Invalid instance ID format: ${instanceId}`);
+    }
+
+    const date = parts.slice(-3).join('-');
+    const id = parts.slice(0, -3).join('-');
+
+    // 1. Check if it's a direct override ID
+    const directOverride = await prisma.override.findUnique({
+      where: { id },
+    });
+
+    if (directOverride) {
+      await prisma.override.delete({
+        where: { id },
+      });
+      return;
+    }
+
+    // 2. Check if it's a baseline activity ID + date
+    const overrideForBaseline = await prisma.override.findFirst({
+      where: { activityId: id, date },
+    });
+
+    if (overrideForBaseline) {
+      await prisma.override.delete({
+        where: { id: overrideForBaseline.id },
+      });
+      return;
+    }
+
+    throw new Error(`Override not found for instance: ${instanceId}`);
+  }
+}
+
 // --- The Adapter Layer --- //
 
 export async function loadSchedule(startDate: Date, endDate: Date): Promise<MaterializedSchedule> {
