@@ -13,6 +13,7 @@ import {
   setActiveWeeklyPlan,
 } from '../../actions'
 import { layoutActivities } from '@/lib/layout'
+import { ScheduleGrid, GridActivity } from '@/components/ScheduleGrid'
 
 interface User {
   id: string
@@ -75,9 +76,11 @@ export default function WeeklyPlanEditorClient({
     { label: 'Wednesday', val: 3 },
     { label: 'Thursday', val: 4 },
     { label: 'Friday', val: 5 },
+    { label: 'Saturday', val: 6 },
+    { label: 'Sunday', val: 7 },
   ]
 
-  const positionedActivities = layoutActivities(plan.activities)
+  const positionedActivities = layoutActivities(plan.activities) as GridActivity[]
 
   const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -243,112 +246,63 @@ export default function WeeklyPlanEditorClient({
 
       {/* Full Width Calendar Grid Container */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-6 shadow-sm">
-        <div className="relative border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-x-auto">
-          <div className="min-w-[800px] select-none">
-            {/* Day Header Row */}
-            <div className="grid grid-cols-[100px_repeat(5,1fr)] border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/20 text-center font-semibold text-sm text-zinc-700 dark:text-zinc-300 py-3">
-              <div>Time</div>
-              {daysOfWeek.map((day) => (
-                <div key={day.val} className="border-l border-zinc-200 dark:border-zinc-800">
-                  {day.label}
+        <ScheduleGrid
+          activities={positionedActivities}
+          daysOfWeek={daysOfWeek}
+          hours={hours}
+          height={700}
+          minWidth={800}
+          renderActivityCard={(act) => (
+            <>
+              <div>
+                <div className="flex items-start justify-between gap-1">
+                  <h4 className="font-bold text-xs leading-tight line-clamp-2" title={act.title}>
+                    {act.title}
+                  </h4>
+                  <form
+                    action={async () => {
+                      if (confirm(`Are you sure you want to delete "${act.title}"?`)) {
+                        await deleteActivity(act.id)
+                      }
+                    }}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <button
+                      type="submit"
+                      className="text-white hover:text-red-200 cursor-pointer p-0.5 rounded hover:bg-white/10"
+                      title="Delete"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </form>
                 </div>
-              ))}
-            </div>
+                <span className="text-[10px] opacity-90 block mt-0.5">
+                  {act.startTime} - {act.endTime}
+                </span>
+              </div>
 
-            {/* Grid Container */}
-            <div className="relative grid grid-cols-[100px_repeat(5,1fr)]" style={{ height: '700px' }}>
-              {/* Hourly Rows */}
-              {hours.map((hour) => (
-                <div
-                  key={hour}
-                  className="col-span-6 border-b border-zinc-100 dark:border-zinc-800/40 relative grid grid-cols-[100px_repeat(5,1fr)]"
-                  style={{ height: `${700 / hours.length}px` }}
-                >
-                  {/* Hour labels */}
-                  <div className="text-xs text-zinc-400 dark:text-zinc-500 flex items-center justify-center font-mono">
-                    {hour.toString().padStart(2, '0')}:00
-                  </div>
-
-                  {/* Vertical columns */}
-                  {daysOfWeek.map((day) => (
-                    <div
-                      key={day.val}
-                      className="border-l border-zinc-100 dark:border-zinc-800/40 h-full"
-                    />
+              <div className="flex flex-col gap-0.5">
+                {act.teachers.length > 0 && (
+                  <span
+                    className="text-[9px] font-semibold opacity-95 truncate"
+                    title={act.teachers.map((t) => t.email).join(', ')}
+                  >
+                    🧑‍🏫 {act.teachers.map((t) => t.email.split('@')[0]).join(', ')}
+                  </span>
+                )}
+                <div className="flex flex-wrap gap-0.5 mt-0.5">
+                  {act.groups.map((g) => (
+                    <span key={g} className="text-[8px] bg-white/25 px-1 py-0.2 rounded font-bold uppercase">
+                      {g.replace('GROUP_', 'G')}
+                    </span>
                   ))}
                 </div>
-              ))}
-
-              {/* Absolute Positioned Activity Cards */}
-              {positionedActivities.map((act) => {
-                const dayColIdx = daysOfWeek.findIndex((d) => d.val === act.dayOfWeek)
-                if (dayColIdx === -1) return null
-
-                return (
-                  <div
-                    key={act.id}
-                    className="absolute group rounded-lg p-2.5 text-white shadow-sm overflow-hidden flex flex-col justify-between select-text transition-transform hover:scale-[1.01]"
-                    style={{
-                      top: `${act.top}%`,
-                      height: `${act.height}%`,
-                      left: `calc(100px + ${dayColIdx} * (100% - 100px) / ${daysOfWeek.length} + ${act.left} * (100% - 100px) / ${daysOfWeek.length} / 100)`,
-                      width: `calc(${act.width}% * (100% - 100px) / ${daysOfWeek.length} / 100 - 4px)`,
-                      backgroundColor: act.activityType.color || '#3b82f6',
-                      border: '1px solid rgba(255,255,255,0.15)',
-                    }}
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-1">
-                        <h4 className="font-bold text-xs leading-tight line-clamp-2" title={act.title}>
-                          {act.title}
-                        </h4>
-                        <form
-                          action={async () => {
-                            if (confirm(`Are you sure you want to delete "${act.title}"?`)) {
-                              await deleteActivity(act.id)
-                            }
-                          }}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <button
-                            type="submit"
-                            className="text-white hover:text-red-200 cursor-pointer p-0.5 rounded hover:bg-white/10"
-                            title="Delete"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </form>
-                      </div>
-                      <span className="text-[10px] opacity-90 block mt-0.5">
-                        {act.startTime} - {act.endTime}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col gap-0.5">
-                      {act.teachers.length > 0 && (
-                        <span
-                          className="text-[9px] font-semibold opacity-95 truncate"
-                          title={act.teachers.map((t) => t.email).join(', ')}
-                        >
-                          🧑‍🏫 {act.teachers.map((t) => t.email.split('@')[0]).join(', ')}
-                        </span>
-                      )}
-                      <div className="flex flex-wrap gap-0.5 mt-0.5">
-                        {act.groups.map((g) => (
-                          <span key={g} className="text-[8px] bg-white/25 px-1 py-0.2 rounded font-bold uppercase">
-                            {g.replace('GROUP_', 'G')}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
+              </div>
+            </>
+          )}
+        />
       </div>
 
       {/* Add Activity Modal Form */}
@@ -397,6 +351,8 @@ export default function WeeklyPlanEditorClient({
                     <option value="3">Wednesday</option>
                     <option value="4">Thursday</option>
                     <option value="5">Friday</option>
+                    <option value="6">Saturday</option>
+                    <option value="7">Sunday</option>
                   </select>
                 </div>
 
