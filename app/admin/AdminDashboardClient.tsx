@@ -92,7 +92,8 @@ export default function AdminDashboardClient({
     })
     return layout.items.map(item => ({
       ...item.activity,
-      style: item.style
+      style: item.style,
+      layout: item.layout
     })) as unknown as GridActivity[]
   }, [activePlan])
 

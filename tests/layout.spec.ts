@@ -1,88 +1,136 @@
 import { test, expect } from '@playwright/test';
-import { layoutActivities } from '../lib/layout';
+import { prisma } from '../lib/prisma';
 
-test.describe('Calendar Layout Algorithm (Pure Math)', () => {
-  test('positions a single activity correctly within the default 8:00 to 18:00 grid', () => {
-    const activities = [
-      { id: '1', dayOfWeek: 1, startTime: '09:00', endTime: '10:00' }
-    ];
+test.describe.serial('Schedule Grid Layout Visuals', () => {
+  const planId = '00000000-0000-0000-0000-000000000300';
+  const typeId = '00000000-0000-0000-0000-000000000301';
 
-    const positioned = layoutActivities(activities);
+  test.beforeEach(async () => {
+    // 1. Deactivate other plans
+    await prisma.weeklyPlan.updateMany({ data: { isActive: false } });
 
-    expect(positioned).toHaveLength(1);
-    const act = positioned[0];
-    
-    // 8:00 to 18:00 = 10 hours = 600 minutes
-    // 9:00 to 10:00 = 60 minutes
-    // 9:00 is 1 hour (60 mins) from 8:00. 60 / 600 = 10%
-    expect(act.top).toBeCloseTo(10);
-    // 1 hour duration. 60 / 600 = 10%
-    expect(act.height).toBeCloseTo(10);
-    
-    // Only 1 column
-    expect(act.left).toBeCloseTo(0);
-    expect(act.width).toBeCloseTo(100);
+    // 2. Seed a plan and activity type
+    await prisma.weeklyPlan.upsert({
+      where: { id: planId },
+      update: { isActive: true },
+      create: { id: planId, name: 'Layout Test Plan', isActive: true },
+    });
+
+    await prisma.activityType.upsert({
+      where: { id: typeId },
+      update: { name: 'Lecture', color: '#ef4444' },
+      create: { id: typeId, name: 'Lecture', color: '#ef4444' },
+    });
+
+    // 3. Clear existing activities for this plan
+    await prisma.activity.deleteMany({ where: { weeklyPlanId: planId } });
   });
 
-  test('handles two overlapping activities by splitting them into two columns', () => {
-    const activities = [
-      { id: '1', dayOfWeek: 1, startTime: '09:00', endTime: '10:30' },
-      { id: '2', dayOfWeek: 1, startTime: '10:00', endTime: '11:00' }
-    ];
-
-    const positioned = layoutActivities(activities);
-
-    expect(positioned).toHaveLength(2);
-    
-    const act1 = positioned.find(a => a.id === '1')!;
-    const act2 = positioned.find(a => a.id === '2')!;
-
-    // Both should be 50% width
-    expect(act1.width).toBeCloseTo(50);
-    expect(act2.width).toBeCloseTo(50);
-
-    // act1 is column 0, act2 is column 1
-    expect(act1.left).toBeCloseTo(0);
-    expect(act2.left).toBeCloseTo(50);
+  test.afterEach(async () => {
+    await prisma.activity.deleteMany({ where: { weeklyPlanId: planId } }).catch(() => {});
+    await prisma.weeklyPlan.delete({ where: { id: planId } }).catch(() => {});
+    await prisma.activityType.delete({ where: { id: typeId } }).catch(() => {});
   });
 
-  test('handles three overlapping activities', () => {
-    const activities = [
-      { id: '1', dayOfWeek: 1, startTime: '09:00', endTime: '10:30' },
-      { id: '2', dayOfWeek: 1, startTime: '09:30', endTime: '10:00' },
-      { id: '3', dayOfWeek: 1, startTime: '09:45', endTime: '11:00' }
-    ];
+  test('activities are correctly positioned horizontally across days', async ({ page, context }) => {
+    // Create one activity on Monday (day 1) and one on Wednesday (day 3)
+    await prisma.activity.createMany({
+      data: [
+        {
+          id: '00000000-0000-0000-0000-000000000302',
+          title: 'Monday Activity',
+          dayOfWeek: 1,
+          startTime: '09:00',
+          endTime: '10:00',
+          weeklyPlanId: planId,
+          activityTypeId: typeId,
+        },
+        {
+          id: '00000000-0000-0000-0000-000000000303',
+          title: 'Wednesday Activity',
+          dayOfWeek: 3,
+          startTime: '09:00',
+          endTime: '10:00',
+          weeklyPlanId: planId,
+          activityTypeId: typeId,
+        }
+      ]
+    });
 
-    const positioned = layoutActivities(activities);
+    await context.addCookies([
+      { name: 'sb-access-token', value: 'mock-admin-token', domain: 'localhost', path: '/' }
+    ]);
 
-    expect(positioned).toHaveLength(3);
-    
-    const widths = positioned.map(a => a.width);
-    // 3 overlapping activities = 3 columns = ~33.33% each
-    for (const w of widths) {
-      expect(w).toBeCloseTo(33.33, 1);
-    }
+    await page.goto('/admin');
 
-    const lefts = positioned.map(a => a.left).sort((a, b) => a - b);
-    expect(lefts[0]).toBeCloseTo(0, 1);
-    expect(lefts[1]).toBeCloseTo(33.33, 1);
-    expect(lefts[2]).toBeCloseTo(66.66, 1);
+    // Find the activity cards
+    const mondayCard = page.locator('div', { hasText: 'Monday Activity' }).last();
+    const wednesdayCard = page.locator('div', { hasText: 'Wednesday Activity' }).last();
+
+    await expect(mondayCard).toBeVisible();
+    await expect(wednesdayCard).toBeVisible();
+
+    // Get the bounding boxes or CSS styles
+    const mondayBox = await mondayCard.boundingBox();
+    const wednesdayBox = await wednesdayCard.boundingBox();
+
+    expect(mondayBox).not.toBeNull();
+    expect(wednesdayBox).not.toBeNull();
+
+    // Wednesday should be significantly to the right of Monday
+    // Each day column is (100% - 100px) / 7. 
+    // On a 1280px screen (default), column width is ~168px.
+    // Monday starts at 100px. Wednesday starts at 100px + 2*168px = 436px.
+    expect(wednesdayBox!.x).toBeGreaterThan(mondayBox!.x + 200);
+
+    // Verify they are NOT at x=0 or x=100 (if they were both pushed to left)
+    expect(mondayBox!.x).toBeGreaterThan(50); // Should be around 100+ (padding/margins)
   });
 
-  test('does not overlap activities on different days', () => {
-    const activities = [
-      { id: '1', dayOfWeek: 1, startTime: '09:00', endTime: '10:30' }, // Monday
-      { id: '2', dayOfWeek: 2, startTime: '09:00', endTime: '10:30' }  // Tuesday
-    ];
+  test('overlapping activities are correctly split into columns within a day', async ({ page, context }) => {
+    // Create two overlapping activities on Tuesday (day 2)
+    await prisma.activity.createMany({
+      data: [
+        {
+          id: '00000000-0000-0000-0000-000000000304',
+          title: 'Overlap 1',
+          dayOfWeek: 2,
+          startTime: '09:00',
+          endTime: '10:30',
+          weeklyPlanId: planId,
+          activityTypeId: typeId,
+        },
+        {
+          id: '00000000-0000-0000-0000-000000000305',
+          title: 'Overlap 2',
+          dayOfWeek: 2,
+          startTime: '09:30',
+          endTime: '11:00',
+          weeklyPlanId: planId,
+          activityTypeId: typeId,
+        }
+      ]
+    });
 
-    const positioned = layoutActivities(activities);
+    await context.addCookies([
+      { name: 'sb-access-token', value: 'mock-admin-token', domain: 'localhost', path: '/' }
+    ]);
 
-    expect(positioned).toHaveLength(2);
+    await page.goto('/admin');
+
+    const card1 = page.locator('div', { hasText: 'Overlap 1' }).last();
+    const card2 = page.locator('div', { hasText: 'Overlap 2' }).last();
+
+    await expect(card1).toBeVisible();
+    await expect(card2).toBeVisible();
+
+    const box1 = await card1.boundingBox();
+    const box2 = await card2.boundingBox();
+
+    // Overlap 2 should be to the right of Overlap 1
+    expect(box2!.x).toBeGreaterThan(box1!.x + 20);
     
-    // They should both be full width since they are on different days
-    expect(positioned[0].width).toBeCloseTo(100);
-    expect(positioned[1].width).toBeCloseTo(100);
-    expect(positioned[0].left).toBeCloseTo(0);
-    expect(positioned[1].left).toBeCloseTo(0);
+    // They should have roughly the same width (50% of the column)
+    expect(Math.abs(box1!.width - box2!.width)).toBeLessThan(10);
   });
 });

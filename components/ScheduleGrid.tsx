@@ -10,6 +10,12 @@ export interface GridActivity {
   startTime: string
   endTime: string
   style: React.CSSProperties
+  layout: {
+    top: number
+    left: number
+    width: number
+    height: number
+  }
   activityType: {
     color: string
     name: string
@@ -99,8 +105,8 @@ export function ScheduleGrid({
             
             const finalStyle: React.CSSProperties = {
               ...act.style,
-              left: `calc(${leftOffset} + (${act.style.left} * ${colWidth} / 100))`,
-              width: `calc((${act.style.width} * ${colWidth} / 100) - 4px)`,
+              left: `calc(${leftOffset} + (${act.layout.left} * ${colWidth} / 100))`,
+              width: `calc((${act.layout.width} * ${colWidth} / 100) - 4px)`,
               backgroundColor: act.activityType.color || '#3b82f6',
               border: '1px solid rgba(255,255,255,0.15)',
             }

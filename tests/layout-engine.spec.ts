@@ -30,6 +30,11 @@ test.describe('LayoutEngine', () => {
     expect(item.style.height).toBe('10%');
     expect(item.style.left).toBe('0%');
     expect(item.style.width).toBe('100%');
+    
+    expect(item.layout.top).toBe(10);
+    expect(item.layout.height).toBe(10);
+    expect(item.layout.left).toBe(0);
+    expect(item.layout.width).toBe(100);
     expect(item.activity.title).toBe('Math');
   });
 
@@ -53,10 +58,14 @@ test.describe('LayoutEngine', () => {
     // Both should be 50% width
     expect(item1.style.width).toBe('50%');
     expect(item2.style.width).toBe('50%');
+    expect(item1.layout.width).toBe(50);
+    expect(item2.layout.width).toBe(50);
 
     // item1 is column 0 (0%), item2 is column 1 (50%)
     expect(item1.style.left).toBe('0%');
     expect(item2.style.left).toBe('50%');
+    expect(item1.layout.left).toBe(0);
+    expect(item2.layout.left).toBe(50);
   });
 
   test('groups activities by date in agenda view without complex styles', () => {

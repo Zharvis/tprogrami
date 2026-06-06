@@ -12,6 +12,12 @@ export interface LayoutEngineOptions {
 export interface PositionedActivity<T> {
   activity: T;
   style: React.CSSProperties;
+  layout: {
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  };
   metadata: {
     isHappeningNow: boolean;
     isNextUp: boolean;
@@ -115,6 +121,12 @@ export function computeLayout<T extends { startTime: string; endTime: string; da
               height: `${height}%`,
               left: `${left}%`,
               width: `${width}%`,
+            },
+            layout: {
+              top,
+              left,
+              width,
+              height,
             },
             metadata: {
               isHappeningNow: false,
