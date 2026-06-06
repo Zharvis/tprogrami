@@ -1,212 +1,193 @@
 import { prisma } from './prisma';
 
-export interface ActivityInstance {
-  id: string; // Projected unique ID: e.g., `${activityId}-${dateString}`
+// --- Domain Interfaces --- //
+
+export interface ActivityTypeInfo {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface TeacherInfo {
+  id: string;
+  email: string;
+}
+
+export interface BaselineActivity {
+  id: string;
   title: string;
-  date: string; // YYYY-MM-DD format
+  dayOfWeek: number; // 1 = Monday, ..., 7 = Sunday
+  startTime: string; // "HH:MM" e.g., "08:30"
+  endTime: string;   // "HH:MM" e.g., "10:00"
+  activityType: ActivityTypeInfo;
+  groups: string[];
+  teachers: TeacherInfo[];
+}
+
+export interface OverrideData {
+  id: string;
+  date: string; // "YYYY-MM-DD" e.g., "2026-06-08"
+  isCancelled: boolean;
+  activityId: string | null;
+  
+  title?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  activityType?: ActivityTypeInfo | null;
+  groups?: string[];
+  teachers?: TeacherInfo[];
+  overrideGroups: boolean;
+  overrideTeachers: boolean;
+}
+
+export interface ActivityInstance {
+  id: string; // Unique combination: `${activityId}-${date}`
+  title: string;
+  date: string; // YYYY-MM-DD
   startTime: string; // HH:MM
   endTime: string; // HH:MM
-  activityType: {
-    id: string;
-    name: string;
-    color: string;
-  };
+  activityType: ActivityTypeInfo;
   groups: string[];
-  teachers: {
-    id: string;
-    email: string;
-  }[];
+  teachers: TeacherInfo[];
   isOverride?: boolean;
   overrideId?: string;
   isOneOff?: boolean;
 }
 
-export interface ResolveScheduleOptions {
-  userId: string;
-  startDate: Date;
-  endDate: Date;
-}
+// --- The Pure Domain Logic --- //
 
-export interface ScheduleData {
-  user: {
-    role: string | null;
-    group: string | null;
-  };
-  activePlan: {
-    activities: {
-      id: string;
-      title: string;
-      dayOfWeek: number;
-      startTime: string;
-      endTime: string;
-      activityType: { id: string; name: string; color: string; };
-      groups: string[];
-      teachers: { id: string; email: string; }[];
-    }[];
-  } | null;
-  overrides: {
-    id: string;
-    activityId: string | null;
-    date: string;
-    isCancelled: boolean;
-    title: string | null;
-    startTime: string | null;
-    endTime: string | null;
-    activityType: { id: string; name: string; color: string; } | null;
-    groups: string[];
-    teachers: { id: string; email: string; }[];
-  }[];
-}
+export class MaterializedSchedule {
+  constructor(
+    private readonly startDate: Date,
+    private readonly endDate: Date,
+    private readonly baseline: BaselineActivity[],
+    private readonly overrides: OverrideData[]
+  ) {}
 
-export function mergeSchedule(
-  data: ScheduleData,
-  startDate: Date,
-  endDate: Date
-): ActivityInstance[] {
-  const { user, activePlan, overrides } = data;
+  getAll(): ActivityInstance[] {
+    const instances: ActivityInstance[] = [];
+    const current = new Date(this.startDate.getTime());
+    
+    while (current <= this.endDate) {
+      const dateStr = current.toISOString().split('T')[0];
+      const jsDay = current.getUTCDay();
+      const dayOfWeek = jsDay === 0 ? 7 : jsDay;
 
-  if (!activePlan) {
-    return [];
+      const dayOverrides = this.overrides.filter((o) => o.date === dateStr);
+      const baselineForDay = this.baseline.filter((act) => act.dayOfWeek === dayOfWeek);
+
+      // 1. Process baseline activities, applying overrides
+      for (const act of baselineForDay) {
+        const override = dayOverrides.find((o) => o.activityId === act.id);
+        
+        if (override) {
+          if (override.isCancelled) {
+            continue; // Skip cancelled activity
+          }
+          
+          instances.push({
+            id: `${act.id}-${dateStr}`,
+            title: override.title ?? act.title,
+            date: dateStr,
+            startTime: override.startTime ?? act.startTime,
+            endTime: override.endTime ?? act.endTime,
+            activityType: override.activityType ?? act.activityType,
+            groups: override.overrideGroups ? (override.groups || []) : act.groups,
+            teachers: override.overrideTeachers ? (override.teachers || []) : act.teachers,
+            isOverride: true,
+            overrideId: override.id,
+          });
+        } else {
+          instances.push({
+            id: `${act.id}-${dateStr}`,
+            title: act.title,
+            date: dateStr,
+            startTime: act.startTime,
+            endTime: act.endTime,
+            activityType: act.activityType,
+            groups: act.groups,
+            teachers: act.teachers,
+          });
+        }
+      }
+
+      // 2. Add one-off activities
+      const oneOffs = dayOverrides.filter((o) => o.activityId === null);
+      for (const override of oneOffs) {
+        if (!override.isCancelled) {
+          instances.push({
+            id: `${override.id}-${dateStr}`,
+            title: override.title ?? '',
+            date: dateStr,
+            startTime: override.startTime ?? '',
+            endTime: override.endTime ?? '',
+            activityType: override.activityType ?? { id: '', name: 'Unknown', color: '#ccc' },
+            groups: override.groups || [],
+            teachers: override.teachers || [],
+            isOneOff: true,
+            overrideId: override.id,
+          });
+        }
+      }
+
+      current.setUTCDate(current.getUTCDate() + 1);
+    }
+
+    // Sort chronologically
+    return instances.sort((a, b) => {
+      if (a.date !== b.date) {
+        return a.date.localeCompare(b.date);
+      }
+      return a.startTime.localeCompare(b.startTime);
+    });
   }
 
-  const instances: ActivityInstance[] = [];
-  const current = new Date(startDate.getTime());
-  
-  while (current <= endDate) {
-    const dateStr = current.toISOString().split('T')[0];
+  forUser(role: string | null, group: string | null): ActivityInstance[] {
+    const all = this.getAll();
+    if (role === 'STUDENT' && group) {
+      return all.filter((act) => act.groups.length === 0 || act.groups.includes(group));
+    }
+    return all;
+  }
+
+  getHappeningAndNext(currentTime: Date, filteredActivities?: ActivityInstance[]): { happening?: ActivityInstance; next?: ActivityInstance } {
+    const activities = filteredActivities || this.getAll();
     
-    // Day of week (1 = Monday, ..., 7 = Sunday)
-    const jsDay = current.getUTCDay();
-    const dayOfWeek = jsDay === 0 ? 7 : jsDay;
+    const currentDateStr = currentTime.toISOString().split('T')[0];
+    const currentHour = currentTime.getUTCHours();
+    const currentMin = currentTime.getUTCMinutes();
+    const currentTimeStr = `${String(currentHour).padStart(2, '0')}:${String(currentMin).padStart(2, '0')}`;
 
-    // Get baseline activities for this day of week
-    const baselineActivities = activePlan.activities.filter(
-      (act) => act.dayOfWeek === dayOfWeek
-    );
+    let happening: ActivityInstance | undefined;
+    let next: ActivityInstance | undefined;
 
-    // Get overrides for this date
-    const dayOverrides = overrides.filter((o) => o.date === dateStr);
+    const todaysActivities = activities.filter((act) => act.date === currentDateStr);
 
-    // Build the list of activities for this day
-    const resolvedDayActivities: any[] = [];
-
-    // 1. Process baseline activities, applying overrides
-    for (const act of baselineActivities) {
-      const override = dayOverrides.find((o) => o.activityId === act.id);
-      if (override) {
-        if (override.isCancelled) {
-          // Skip cancelled activity
-          continue;
+    for (const act of todaysActivities) {
+      if (act.startTime <= currentTimeStr && act.endTime >= currentTimeStr) {
+        happening = act;
+      } else if (act.startTime > currentTimeStr) {
+        if (!next || act.startTime < next.startTime) {
+          next = act;
         }
-        // Add modified activity
-        resolvedDayActivities.push({
-          id: `${act.id}-${dateStr}`,
-          title: override.title ?? act.title,
-          date: dateStr,
-          startTime: override.startTime ?? act.startTime,
-          endTime: override.endTime ?? act.endTime,
-          activityType: override.activityType
-            ? { id: override.activityType.id, name: override.activityType.name, color: override.activityType.color }
-            : { id: act.activityType.id, name: act.activityType.name, color: act.activityType.color },
-          groups: override.overrideGroups ? override.groups : (override.groups && override.groups.length > 0 ? override.groups : act.groups),
-          teachers: override.overrideTeachers ? override.teachers : (override.teachers && override.teachers.length > 0 ? override.teachers : act.teachers),
-        });
-      } else {
-        // No override, add baseline activity
-        resolvedDayActivities.push({
-          id: `${act.id}-${dateStr}`,
-          title: act.title,
-          date: dateStr,
-          startTime: act.startTime,
-          endTime: act.endTime,
-          activityType: {
-            id: act.activityType.id,
-            name: act.activityType.name,
-            color: act.activityType.color,
-          },
-          groups: act.groups,
-          teachers: act.teachers,
-        });
       }
     }
 
-    // 2. Add one-off activities (overrides with activityId === null)
-    const oneOffs = dayOverrides.filter((o) => o.activityId === null);
-    for (const override of oneOffs) {
-      resolvedDayActivities.push({
-        id: `${override.id}-${dateStr}`,
-        title: override.title ?? '',
-        date: dateStr,
-        startTime: override.startTime ?? '',
-        endTime: override.endTime ?? '',
-        activityType: override.activityType
-          ? { id: override.activityType.id, name: override.activityType.name, color: override.activityType.color }
-          : { id: '', name: 'Unknown', color: '#ccc' },
-        groups: override.groups,
-        teachers: override.teachers,
-        isOneOff: true,
-        overrideId: override.id,
-      });
+    if (!next) {
+      const futureActivities = activities.filter((act) => act.date > currentDateStr);
+      if (futureActivities.length > 0) {
+        next = futureActivities[0];
+      }
     }
 
-    // 3. Apply student group filtering on the final day's activities
-    let filteredDayActivities = resolvedDayActivities;
-    if (user.role === 'STUDENT' && user.group) {
-      filteredDayActivities = filteredDayActivities.filter(
-        (act) => act.groups.length === 0 || act.groups.includes(user.group!)
-      );
-    }
-
-    // 4. Push to instances
-    for (const act of filteredDayActivities) {
-      instances.push({
-        id: act.id,
-        title: act.title,
-        date: act.date,
-        startTime: act.startTime,
-        endTime: act.endTime,
-        activityType: act.activityType,
-        groups: act.groups,
-        teachers: act.teachers.map((t: any) => ({
-          id: t.id,
-          email: t.email,
-        })),
-        isOverride: act.isOverride,
-        overrideId: act.overrideId,
-        isOneOff: act.isOneOff,
-      });
-    }
-
-    current.setUTCDate(current.getUTCDate() + 1);
+    return { happening, next };
   }
-
-  // Sort chronologically
-  return instances.sort((a, b) => {
-    if (a.date !== b.date) {
-      return a.date.localeCompare(b.date);
-    }
-    return a.startTime.localeCompare(b.startTime);
-  });
 }
 
-/**
- * Projects active Weekly Plan activities onto calendar dates within the date range,
- * filtering them according to the user's role and target groups.
- */
-export async function resolveSchedule(options: ResolveScheduleOptions): Promise<ActivityInstance[]> {
-  const { userId, startDate, endDate } = options;
+// --- The Adapter Layer --- //
 
-  // Fetch user role and group
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true, group: true }
-  });
-
-  if (!user) {
-    return [];
-  }
-
-  // 1. Fetch active weekly plan
+export async function loadSchedule(startDate: Date, endDate: Date): Promise<MaterializedSchedule> {
+  // 1. Fetch active weekly plan baseline
   const activePlan = await prisma.weeklyPlan.findFirst({
     where: { isActive: true },
     include: {
@@ -219,11 +200,26 @@ export async function resolveSchedule(options: ResolveScheduleOptions): Promise<
     },
   });
 
-  // Fetch all overrides within the date range
+  const baseline: BaselineActivity[] = activePlan?.activities.map((act) => ({
+    id: act.id,
+    title: act.title,
+    dayOfWeek: act.dayOfWeek,
+    startTime: act.startTime,
+    endTime: act.endTime,
+    activityType: {
+      id: act.activityType.id,
+      name: act.activityType.name,
+      color: act.activityType.color,
+    },
+    groups: act.groups,
+    teachers: act.teachers.map(t => ({ id: t.id, email: t.email })),
+  })) || [];
+
+  // 2. Fetch overrides within range
   const startStr = startDate.toISOString().split('T')[0];
   const endStr = endDate.toISOString().split('T')[0];
 
-  const overrides = await prisma.override.findMany({
+  const rawOverrides = await prisma.override.findMany({
     where: {
       date: {
         gte: startStr,
@@ -236,53 +232,25 @@ export async function resolveSchedule(options: ResolveScheduleOptions): Promise<
     },
   });
 
-  return mergeSchedule(
-    { 
-      user, 
-      activePlan: activePlan as any, 
-      overrides: overrides as any 
-    }, 
-    startDate, 
-    endDate
-  );
-}
+  const overrides: OverrideData[] = rawOverrides.map((o) => ({
+    id: o.id,
+    date: o.date,
+    isCancelled: o.isCancelled,
+    activityId: o.activityId,
+    title: o.title,
+    startTime: o.startTime,
+    endTime: o.endTime,
+    activityType: o.activityType ? {
+      id: o.activityType.id,
+      name: o.activityType.name,
+      color: o.activityType.color,
+    } : null,
+    groups: o.groups,
+    teachers: o.teachers.map(t => ({ id: t.id, email: t.email })),
+    overrideGroups: o.overrideGroups,
+    overrideTeachers: o.overrideTeachers,
+  }));
 
-/**
- * Determines which activity is "Happening Now" and which is "Up Next" based on the current time.
- */
-export function getHappeningAndNext(
-  activities: ActivityInstance[],
-  currentTime: Date
-): { happening?: ActivityInstance; next?: ActivityInstance } {
-  const currentDateStr = currentTime.toISOString().split('T')[0];
-  const currentHour = currentTime.getUTCHours();
-  const currentMin = currentTime.getUTCMinutes();
-  const currentTimeStr = `${String(currentHour).padStart(2, '0')}:${String(currentMin).padStart(2, '0')}`;
-
-  let happening: ActivityInstance | undefined;
-  let next: ActivityInstance | undefined;
-
-  // Filter activities for today
-  const todaysActivities = activities.filter((act) => act.date === currentDateStr);
-
-  for (const act of todaysActivities) {
-    if (act.startTime <= currentTimeStr && act.endTime >= currentTimeStr) {
-      happening = act;
-    } else if (act.startTime > currentTimeStr) {
-      if (!next || act.startTime < next.startTime) {
-        next = act;
-      }
-    }
-  }
-
-  // If no next activity today, look for the first activity on future days
-  if (!next) {
-    const futureActivities = activities.filter((act) => act.date > currentDateStr);
-    if (futureActivities.length > 0) {
-      // Future activities are sorted chronologically, so the first is the closest
-      next = futureActivities[0];
-    }
-  }
-
-  return { happening, next };
+  // 3. Return pure engine
+  return new MaterializedSchedule(startDate, endDate, baseline, overrides);
 }

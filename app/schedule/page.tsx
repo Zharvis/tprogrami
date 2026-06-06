@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '../../lib/auth';
-import { resolveSchedule, getHappeningAndNext } from '../../lib/schedule';
+import { loadSchedule } from '../../lib/schedule';
 import Link from 'next/link';
 import { prisma } from '../../lib/prisma';
 import ScheduleClient from './ScheduleClient';
@@ -85,13 +85,9 @@ export default async function SchedulePage({
   endOfWeek.setDate(startOfWeek.getDate() + 6);
   endOfWeek.setHours(23, 59, 59, 999);
 
-  const activities = await resolveSchedule({
-    userId: user.id,
-    startDate: startOfWeek,
-    endDate: endOfWeek,
-  });
-
-  const { happening, next } = getHappeningAndNext(activities, today);
+  const schedule = await loadSchedule(startOfWeek, endOfWeek);
+  const activities = schedule.forUser(user.role, user.group);
+  const { happening, next } = schedule.getHappeningAndNext(today, activities);
 
   // Navigation dates
   const prevWeekDate = new Date(startOfWeek);
@@ -125,8 +121,8 @@ export default async function SchedulePage({
 
   // Fetch activity types and teachers if admin
   const isAdmin = user.role === 'ADMIN';
-  let activityTypes: any[] = [];
-  let teachers: any[] = [];
+  let activityTypes: { id: string; name: string; color: string }[] = [];
+  let teachers: { id: string; email: string }[] = [];
 
   if (isAdmin) {
     activityTypes = await prisma.activityType.findMany({

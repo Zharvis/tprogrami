@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { prisma } from '../lib/prisma';
-import { resolveSchedule, mergeSchedule, getHappeningAndNext } from '../lib/schedule';
+import { MaterializedSchedule, ActivityInstance } from '../lib/schedule';
 
 test.describe.serial('Schedule Projection Logic (TDD)', () => {
   const planId = '55555555-5555-5555-5555-555555555555';
@@ -108,40 +108,35 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
   test.describe('Pure Schedule Merging Logic (Unit)', () => {
     const type1 = { id: 'type-1', name: 'TDD Lesson', color: '#ef4444' };
     
-    const baseData = {
-      user: { role: 'STUDENT', group: 'GROUP_1' },
-      activePlan: {
-        activities: [
-          {
-            id: 'act-1',
-            title: 'Group 1 Activity',
-            dayOfWeek: 1, // Monday
-            startTime: '09:00',
-            endTime: '10:30',
-            activityType: type1,
-            groups: ['GROUP_1'],
-            teachers: [],
-          },
-          {
-            id: 'act-2',
-            title: 'Group 2 Activity',
-            dayOfWeek: 1,
-            startTime: '11:00',
-            endTime: '12:30',
-            activityType: type1,
-            groups: ['GROUP_2'],
-            teachers: [],
-          }
-        ]
+    const baseline = [
+      {
+        id: 'act-1',
+        title: 'Group 1 Activity',
+        dayOfWeek: 1, // Monday
+        startTime: '09:00',
+        endTime: '10:30',
+        activityType: type1,
+        groups: ['GROUP_1'],
+        teachers: [],
       },
-      overrides: []
-    };
+      {
+        id: 'act-2',
+        title: 'Group 2 Activity',
+        dayOfWeek: 1,
+        startTime: '11:00',
+        endTime: '12:30',
+        activityType: type1,
+        groups: ['GROUP_2'],
+        teachers: [],
+      }
+    ];
 
     test('projects recurring weekly plan activity onto calendar dates (Slice 1)', () => {
       const startDate = new Date('2026-06-08T00:00:00.000Z');
       const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-      const instances = mergeSchedule(baseData, startDate, endDate);
+      const schedule = new MaterializedSchedule(startDate, endDate, baseline, []);
+      const instances = schedule.getAll();
 
       const g1Inst = instances.find(inst => inst.title === 'Group 1 Activity');
       expect(g1Inst).toBeDefined();
@@ -154,7 +149,8 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
       const startDate = new Date('2026-06-08T00:00:00.000Z');
       const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-      const instances = mergeSchedule(baseData, startDate, endDate);
+      const schedule = new MaterializedSchedule(startDate, endDate, baseline, []);
+      const instances = schedule.forUser('STUDENT', 'GROUP_1');
 
       expect(instances).toHaveLength(1);
       expect(instances[0].title).toBe('Group 1 Activity');
@@ -164,8 +160,8 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
       const startDate = new Date('2026-06-08T00:00:00.000Z');
       const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-      const data = { ...baseData, user: { role: 'TEACHER', group: null } };
-      const instances = mergeSchedule(data, startDate, endDate);
+      const schedule = new MaterializedSchedule(startDate, endDate, baseline, []);
+      const instances = schedule.forUser('TEACHER', null);
 
       expect(instances).toHaveLength(2);
       const titles = instances.map(i => i.title);
@@ -177,55 +173,56 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
       const startDate = new Date('2026-06-08T00:00:00.000Z');
       const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-      const data = {
-        ...baseData,
-        overrides: [
-          {
-            id: 'ovr-1',
-            date: '2026-06-08',
-            isCancelled: false,
-            activityId: 'act-1',
-            title: 'Overridden Math Class',
-            startTime: '10:00',
-            endTime: '11:30',
-            activityType: null,
-            groups: [],
-            teachers: []
-          }
-        ]
-      };
+      const overrides = [
+        {
+          id: 'ovr-1',
+          date: '2026-06-08',
+          isCancelled: false,
+          activityId: 'act-1',
+          title: 'Overridden Math Class',
+          startTime: '10:00',
+          endTime: '11:30',
+          activityType: null,
+          groups: [],
+          teachers: [],
+          overrideGroups: false,
+          overrideTeachers: false,
+        }
+      ];
 
-      const instances = mergeSchedule(data, startDate, endDate);
+      const schedule = new MaterializedSchedule(startDate, endDate, baseline, overrides);
+      const instances = schedule.getAll();
 
-      expect(instances).toHaveLength(1);
-      expect(instances[0].title).toBe('Overridden Math Class');
-      expect(instances[0].startTime).toBe('10:00');
-      expect(instances[0].endTime).toBe('11:30');
+      expect(instances).toHaveLength(2);
+      const act = instances.find(i => i.title === 'Overridden Math Class');
+      expect(act).toBeDefined();
+      expect(act?.startTime).toBe('10:00');
+      expect(act?.endTime).toBe('11:30');
     });
 
     test('applies date-specific override cancellations (Slice 2)', () => {
       const startDate = new Date('2026-06-08T00:00:00.000Z');
       const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-      const data = {
-        ...baseData,
-        overrides: [
-          {
-            id: 'ovr-1',
-            date: '2026-06-08',
-            isCancelled: true,
-            activityId: 'act-1',
-            title: null,
-            startTime: null,
-            endTime: null,
-            activityType: null,
-            groups: [],
-            teachers: []
-          }
-        ]
-      };
+      const overrides = [
+        {
+          id: 'ovr-1',
+          date: '2026-06-08',
+          isCancelled: true,
+          activityId: 'act-1',
+          title: null,
+          startTime: null,
+          endTime: null,
+          activityType: null,
+          groups: [],
+          teachers: [],
+          overrideGroups: false,
+          overrideTeachers: false,
+        }
+      ];
 
-      const instances = mergeSchedule(data, startDate, endDate);
+      const schedule = new MaterializedSchedule(startDate, endDate, baseline, overrides);
+      const instances = schedule.forUser('STUDENT', 'GROUP_1');
 
       expect(instances).toHaveLength(0); // activity 1 cancelled, activity 2 filtered out for STUDENT in GROUP_1
     });
@@ -234,27 +231,27 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
       const startDate = new Date('2026-06-08T00:00:00.000Z');
       const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-      const data = {
-        ...baseData,
-        overrides: [
-          {
-            id: 'ovr-1',
-            date: '2026-06-08',
-            isCancelled: false,
-            activityId: null,
-            title: 'One-off TDD Workshop',
-            startTime: '14:00',
-            endTime: '15:30',
-            activityType: type1,
-            groups: ['GROUP_1'],
-            teachers: []
-          }
-        ]
-      };
+      const overrides = [
+        {
+          id: 'ovr-1',
+          date: '2026-06-08',
+          isCancelled: false,
+          activityId: null,
+          title: 'One-off TDD Workshop',
+          startTime: '14:00',
+          endTime: '15:30',
+          activityType: type1,
+          groups: ['GROUP_1'],
+          teachers: [],
+          overrideGroups: true,
+          overrideTeachers: true,
+        }
+      ];
 
-      const instances = mergeSchedule(data, startDate, endDate);
+      const schedule = new MaterializedSchedule(startDate, endDate, baseline, overrides);
+      const instances = schedule.getAll();
 
-      expect(instances).toHaveLength(2);
+      expect(instances).toHaveLength(3);
       const titles = instances.map(i => i.title);
       expect(titles).toContain('Group 1 Activity');
       expect(titles).toContain('One-off TDD Workshop');
@@ -264,25 +261,25 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
       const startDate = new Date('2026-06-08T00:00:00.000Z');
       const endDate = new Date('2026-06-14T23:59:59.999Z');
 
-      const data = {
-        ...baseData,
-        overrides: [
-          {
-            id: 'ovr-1',
-            date: '2026-06-08',
-            isCancelled: false,
-            activityId: null,
-            title: 'One-off for Group 2',
-            startTime: '14:00',
-            endTime: '15:30',
-            activityType: type1,
-            groups: ['GROUP_2'],
-            teachers: []
-          }
-        ]
-      };
+      const overrides = [
+        {
+          id: 'ovr-1',
+          date: '2026-06-08',
+          isCancelled: false,
+          activityId: null,
+          title: 'One-off for Group 2',
+          startTime: '14:00',
+          endTime: '15:30',
+          activityType: type1,
+          groups: ['GROUP_2'],
+          teachers: [],
+          overrideGroups: true,
+          overrideTeachers: true,
+        }
+      ];
 
-      const instances = mergeSchedule(data, startDate, endDate);
+      const schedule = new MaterializedSchedule(startDate, endDate, baseline, overrides);
+      const instances = schedule.forUser('STUDENT', 'GROUP_1');
 
       expect(instances).toHaveLength(1);
       expect(instances[0].title).toBe('Group 1 Activity'); // only their own group's activity
@@ -313,21 +310,23 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
     };
 
     test('identifies happening now and up next', () => {
+      const schedule = new MaterializedSchedule(new Date(), new Date(), [], []);
+      
       // 1. Current time is 09:30 on Monday, June 8, 2026 -> First Class happening, Second Class next
       const time1 = new Date('2026-06-08T09:30:00.000Z');
-      const result1 = getHappeningAndNext([mockActivity1, mockActivity2], time1);
+      const result1 = schedule.getHappeningAndNext(time1, [mockActivity1, mockActivity2] as ActivityInstance[]);
       expect(result1.happening?.title).toBe('First Class');
       expect(result1.next?.title).toBe('Second Class');
 
       // 2. Current time is 10:45 -> None happening, Second Class next
       const time2 = new Date('2026-06-08T10:45:00.000Z');
-      const result2 = getHappeningAndNext([mockActivity1, mockActivity2], time2);
+      const result2 = schedule.getHappeningAndNext(time2, [mockActivity1, mockActivity2] as ActivityInstance[]);
       expect(result2.happening).toBeUndefined();
       expect(result2.next?.title).toBe('Second Class');
 
       // 3. Current time is 13:00 -> None happening, None next
       const time3 = new Date('2026-06-08T13:00:00.000Z');
-      const result3 = getHappeningAndNext([mockActivity1, mockActivity2], time3);
+      const result3 = schedule.getHappeningAndNext(time3, [mockActivity1, mockActivity2] as ActivityInstance[]);
       expect(result3.happening).toBeUndefined();
       expect(result3.next).toBeUndefined();
     });
