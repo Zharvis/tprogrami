@@ -4,6 +4,7 @@ import { useState, useTransition, useMemo } from 'react'
 import Link from 'next/link'
 import { Role, Group } from '@/app/generated/prisma'
 import { upsertOverride, deleteOverride } from '../admin/actions'
+import { computeLayout, PositionedActivity } from '@/lib/layout-engine'
 
 interface User {
   id: string
@@ -44,8 +45,6 @@ interface ScheduleClientProps {
   activities: ActivityInstance[]
   weekDays: string[]
   groupedActivities: { [dateStr: string]: ActivityInstance[] }
-  happening: ActivityInstance | undefined
-  next: ActivityInstance | undefined
   prevWeekStr: string
   nextWeekStr: string
   todayStr: string
@@ -57,9 +56,7 @@ interface ScheduleClientProps {
 export default function ScheduleClient({
   user,
   weekDays,
-  groupedActivities,
-  happening,
-  next,
+  groupedActivities: initialGroupedActivities,
   prevWeekStr,
   nextWeekStr,
   todayStr,
@@ -67,6 +64,7 @@ export default function ScheduleClient({
   activityTypes,
   teachers,
 }: ScheduleClientProps) {
+
   const [isPending, startTransition] = useTransition()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<'add' | 'edit'>('add')
@@ -85,18 +83,26 @@ export default function ScheduleClient({
 
   const isAdmin = user.role === 'ADMIN'
 
-  // Pre-filter activities for Teachers based on the toggle
-  const processedActivities = useMemo(() => {
-    const result: { [key: string]: ActivityInstance[] } = {}
+  // Use the new LayoutEngine
+  const layout = useMemo(() => {
+    const allActivities: ActivityInstance[] = []
     weekDays.forEach(dateStr => {
-      let acts = groupedActivities[dateStr] || []
+      let acts = initialGroupedActivities[dateStr] || []
       if (user.role === 'TEACHER' && showMyActivitiesOnly) {
         acts = acts.filter(act => act.teachers.some(t => t.id === user.id))
       }
-      result[dateStr] = acts
+      allActivities.push(...acts)
     })
-    return result
-  }, [groupedActivities, weekDays, user.role, user.id, showMyActivitiesOnly])
+
+    return computeLayout(allActivities, {
+      viewType: viewMode,
+      now: new Date(),
+    })
+  }, [initialGroupedActivities, weekDays, user.role, user.id, showMyActivitiesOnly, viewMode])
+
+  const { happeningNow, nextUp, groupedByDate: processedActivities } = layout
+  const happening = happeningNow?.activity
+  const next = nextUp?.activity
 
   const openAddModal = (dateStr: string) => {
     setModalMode('add')
@@ -363,7 +369,7 @@ export default function ScheduleClient({
 
                   {dayActivities.length > 0 ? (
                     <div className="flex flex-col gap-2">
-                      {dayActivities.map((act) => (
+                      {dayActivities.map(({ activity: act, metadata }) => (
                         <div 
                           key={act.id}
                           className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg border border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-900/50 transition-colors gap-3"
@@ -378,6 +384,11 @@ export default function ScheduleClient({
                                 <h4 className="font-semibold text-zinc-900 dark:text-zinc-50 text-sm">
                                   {act.title}
                                 </h4>
+                                {metadata.isHappeningNow && (
+                                  <span className="text-[9px] bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-400 px-1.5 py-0.2 rounded font-semibold uppercase tracking-wider">
+                                    Now
+                                  </span>
+                                )}
                                 {act.isOverride && (
                                   <span className="text-[9px] bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-400 px-1.5 py-0.2 rounded font-semibold uppercase tracking-wider">
                                     Override
@@ -478,7 +489,7 @@ export default function ScheduleClient({
                     
                     <div className="flex flex-col gap-2 flex-1">
                       {dayActivities.length > 0 ? (
-                        dayActivities.map(act => (
+                        dayActivities.map(({ activity: act }) => (
                           <div 
                             key={act.id} 
                             className="p-2.5 rounded-lg border border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/40 text-xs flex flex-col gap-1.5 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors shadow-xs"

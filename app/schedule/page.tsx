@@ -87,7 +87,6 @@ export default async function SchedulePage({
 
   const schedule = await loadSchedule(startOfWeek, endOfWeek);
   const activities = schedule.forUser(user.role, user.group);
-  const { happening, next } = schedule.getHappeningAndNext(today, activities);
 
   // Navigation dates
   const prevWeekDate = new Date(startOfWeek);
@@ -145,8 +144,6 @@ export default async function SchedulePage({
       activities={activities}
       weekDays={weekDays}
       groupedActivities={groupedActivities}
-      happening={happening}
-      next={next}
       prevWeekStr={prevWeekStr}
       nextWeekStr={nextWeekStr}
       todayStr={todayStr}

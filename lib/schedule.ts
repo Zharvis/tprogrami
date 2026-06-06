@@ -149,39 +149,6 @@ export class MaterializedSchedule {
     }
     return all;
   }
-
-  getHappeningAndNext(currentTime: Date, filteredActivities?: ActivityInstance[]): { happening?: ActivityInstance; next?: ActivityInstance } {
-    const activities = filteredActivities || this.getAll();
-    
-    const currentDateStr = currentTime.toISOString().split('T')[0];
-    const currentHour = currentTime.getUTCHours();
-    const currentMin = currentTime.getUTCMinutes();
-    const currentTimeStr = `${String(currentHour).padStart(2, '0')}:${String(currentMin).padStart(2, '0')}`;
-
-    let happening: ActivityInstance | undefined;
-    let next: ActivityInstance | undefined;
-
-    const todaysActivities = activities.filter((act) => act.date === currentDateStr);
-
-    for (const act of todaysActivities) {
-      if (act.startTime <= currentTimeStr && act.endTime >= currentTimeStr) {
-        happening = act;
-      } else if (act.startTime > currentTimeStr) {
-        if (!next || act.startTime < next.startTime) {
-          next = act;
-        }
-      }
-    }
-
-    if (!next) {
-      const futureActivities = activities.filter((act) => act.date > currentDateStr);
-      if (futureActivities.length > 0) {
-        next = futureActivities[0];
-      }
-    }
-
-    return { happening, next };
-  }
 }
 
 // --- The Adapter Layer --- //

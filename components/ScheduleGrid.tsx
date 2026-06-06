@@ -9,10 +9,7 @@ export interface GridActivity {
   dayOfWeek: number
   startTime: string
   endTime: string
-  top: number
-  height: number
-  left: number
-  width: number
+  style: React.CSSProperties
   activityType: {
     color: string
     name: string
@@ -97,21 +94,22 @@ export function ScheduleGrid({
             const dayColIdx = daysOfWeek.findIndex((d) => d.val === act.dayOfWeek)
             if (dayColIdx === -1) return null
 
-            const leftCalc = `calc(${timeColumnWidth}px + ${dayColIdx} * (100% - ${timeColumnWidth}px) / ${daysOfWeek.length} + ${act.left} * (100% - ${timeColumnWidth}px) / ${daysOfWeek.length} / 100)`
-            const widthCalc = `calc(${act.width} * (100% - ${timeColumnWidth}px) / ${daysOfWeek.length} / 100 - 4px)`
+            const leftOffset = `calc(${timeColumnWidth}px + ${dayColIdx} * (100% - ${timeColumnWidth}px) / ${daysOfWeek.length})`
+            const colWidth = `calc((100% - ${timeColumnWidth}px) / ${daysOfWeek.length})`
+            
+            const finalStyle: React.CSSProperties = {
+              ...act.style,
+              left: `calc(${leftOffset} + (${act.style.left} * ${colWidth} / 100))`,
+              width: `calc((${act.style.width} * ${colWidth} / 100) - 4px)`,
+              backgroundColor: act.activityType.color || '#3b82f6',
+              border: '1px solid rgba(255,255,255,0.15)',
+            }
 
             return (
               <div
                 key={act.id}
                 className="absolute group rounded-lg p-2 text-white shadow-sm overflow-hidden flex flex-col justify-between select-text transition-transform hover:scale-[1.01]"
-                style={{
-                  top: `${act.top}%`,
-                  height: `${act.height}%`,
-                  left: leftCalc,
-                  width: widthCalc,
-                  backgroundColor: act.activityType.color || '#3b82f6',
-                  border: '1px solid rgba(255,255,255,0.15)',
-                }}
+                style={finalStyle}
               >
                 {renderActivityCard ? (
                   renderActivityCard(act)

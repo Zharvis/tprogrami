@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { prisma } from '../lib/prisma';
 import { MaterializedSchedule, ActivityInstance } from '../lib/schedule';
+import { computeLayout } from '../lib/layout-engine';
 
 test.describe.serial('Schedule Projection Logic (TDD)', () => {
   const planId = '55555555-5555-5555-5555-555555555555';
@@ -310,25 +311,23 @@ test.describe.serial('Schedule Projection Logic (TDD)', () => {
     };
 
     test('identifies happening now and up next', () => {
-      const schedule = new MaterializedSchedule(new Date(), new Date(), [], []);
-      
       // 1. Current time is 09:30 on Monday, June 8, 2026 -> First Class happening, Second Class next
       const time1 = new Date('2026-06-08T09:30:00.000Z');
-      const result1 = schedule.getHappeningAndNext(time1, [mockActivity1, mockActivity2] as ActivityInstance[]);
-      expect(result1.happening?.title).toBe('First Class');
-      expect(result1.next?.title).toBe('Second Class');
+      const result1 = computeLayout([mockActivity1, mockActivity2] as any[], { viewType: 'agenda', now: time1 });
+      expect(result1.happeningNow?.activity.title).toBe('First Class');
+      expect(result1.nextUp?.activity.title).toBe('Second Class');
 
       // 2. Current time is 10:45 -> None happening, Second Class next
       const time2 = new Date('2026-06-08T10:45:00.000Z');
-      const result2 = schedule.getHappeningAndNext(time2, [mockActivity1, mockActivity2] as ActivityInstance[]);
-      expect(result2.happening).toBeUndefined();
-      expect(result2.next?.title).toBe('Second Class');
+      const result2 = computeLayout([mockActivity1, mockActivity2] as any[], { viewType: 'agenda', now: time2 });
+      expect(result2.happeningNow).toBeUndefined();
+      expect(result2.nextUp?.activity.title).toBe('Second Class');
 
       // 3. Current time is 13:00 -> None happening, None next
       const time3 = new Date('2026-06-08T13:00:00.000Z');
-      const result3 = schedule.getHappeningAndNext(time3, [mockActivity1, mockActivity2] as ActivityInstance[]);
-      expect(result3.happening).toBeUndefined();
-      expect(result3.next).toBeUndefined();
+      const result3 = computeLayout([mockActivity1, mockActivity2] as any[], { viewType: 'agenda', now: time3 });
+      expect(result3.happeningNow).toBeUndefined();
+      expect(result3.nextUp).toBeUndefined();
     });
   });
 

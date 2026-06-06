@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Role, Group } from '@/app/generated/prisma'
@@ -10,7 +10,7 @@ import {
   duplicateWeeklyPlan,
   deleteWeeklyPlan,
 } from './actions'
-import { layoutActivities } from '@/lib/layout'
+import { computeLayout } from '@/lib/layout-engine'
 import { ScheduleGrid, GridActivity } from '@/components/ScheduleGrid'
 
 interface User {
@@ -80,7 +80,21 @@ export default function AdminDashboardClient({
     { label: 'Sunday', val: 7 },
   ]
 
-  const positionedActivities = (activePlan ? layoutActivities(activePlan.activities) : []) as GridActivity[]
+  const positionedActivities = useMemo(() => {
+    if (!activePlan) return []
+    const layout = computeLayout(activePlan.activities.map(a => ({
+      ...a,
+      date: `2026-06-0${a.dayOfWeek}` // Dummy dates for weekly plan grid
+    })), {
+      viewType: 'grid',
+      startHour: 8,
+      endHour: 18,
+    })
+    return layout.items.map(item => ({
+      ...item.activity,
+      style: item.style
+    })) as unknown as GridActivity[]
+  }, [activePlan])
 
   const handleSetActive = (id: string) => {
     startTransition(async () => {
