@@ -20,7 +20,7 @@ test.describe('Root page redirection', () => {
     await expect(page).toHaveURL(/.*\/waiting-room/);
   });
 
-  test('verified users are redirected from / to /schedule', async ({ page, context }) => {
+  test('verified users stay on / and see the Bento Box layout', async ({ page, context }) => {
     await context.addCookies([
       {
         name: 'sb-access-token',
@@ -31,10 +31,18 @@ test.describe('Root page redirection', () => {
     ]);
 
     await page.goto('/');
-    await expect(page).toHaveURL(/.*\/schedule/);
+    
+    // Should stay on the root route
+    await expect(page).not.toHaveURL(/.*\/schedule/);
+    // the URL should match the root precisely (or with localhost/port)
+    await expect(page).toHaveURL(/^http:\/\/localhost:\d+\/$/);
+
+    // Should render the Bento Box container
+    const bentoContainer = page.getByTestId('bento-box-container');
+    await expect(bentoContainer).toBeVisible();
   });
 
-  test('admins are redirected from / to /schedule', async ({ page, context }) => {
+  test('admins stay on / and see the Bento Box layout', async ({ page, context }) => {
     await context.addCookies([
       {
         name: 'sb-access-token',
@@ -45,6 +53,13 @@ test.describe('Root page redirection', () => {
     ]);
 
     await page.goto('/');
-    await expect(page).toHaveURL(/.*\/schedule/);
+    
+    // Should stay on the root route
+    await expect(page).not.toHaveURL(/.*\/schedule/);
+    await expect(page).toHaveURL(/^http:\/\/localhost:\d+\/$/);
+
+    // Should render the Bento Box container
+    const bentoContainer = page.getByTestId('bento-box-container');
+    await expect(bentoContainer).toBeVisible();
   });
 });

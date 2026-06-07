@@ -1,6 +1,13 @@
 import { test, expect } from '@playwright/test';
-
+import { prisma } from '../lib/prisma';
 test.describe('Global Navigation', () => {
+  test.beforeEach(async () => {
+    await prisma.user.updateMany({
+      where: { email: 'unverified@test.com' },
+      data: { status: 'UNVERIFIED' },
+    });
+  });
+
   test('verified user can logout from the schedule page', async ({ page, context }) => {
     // 1. Setup: Mock a verified session
     await context.addCookies([

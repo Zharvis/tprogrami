@@ -47,3 +47,7 @@ _Avoid_: Default schedule, master template
 **Override**:
 A specific alteration (modification, cancellation, or addition) to the Weekly Plan that applies only to a specific calendar date.
 _Avoid_: Exception, one-off change
+
+**Home**:
+The default landing page for verified students and teachers, integrating widgets and navigational entry points to other modules seamlessly.
+_Avoid_: Dashboard, landing page

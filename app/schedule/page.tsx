@@ -121,7 +121,7 @@ export default async function SchedulePage({
   // Fetch activity types and teachers if admin
   const isAdmin = user.role === 'ADMIN';
   let activityTypes: { id: string; name: string; color: string }[] = [];
-  let teachers: { id: string; email: string }[] = [];
+  let teachers: any[] = [];
 
   if (isAdmin) {
     activityTypes = await prisma.activityType.findMany({

@@ -31,7 +31,7 @@ export interface LayoutResult<T> {
   groupedByDate: Record<string, PositionedActivity<T>[]>;
 }
 
-export function computeLayout<T extends { startTime: string; endTime: string; dayOfWeek: number; date: string }>(
+export function computeLayout<T extends { startTime: string; endTime: string; date: string }>(
   activities: T[],
   options: LayoutEngineOptions
 ): LayoutResult<T> {
